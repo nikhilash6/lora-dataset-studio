@@ -11,6 +11,10 @@ export const ACTION_TOPICS = [
   action('action-store-install-selection', 'Install several plugins together',
     ['plugins', 'store', 'install', 'batch', 'selection', 'one restart', 'docker'],
     '/plugins', 'getting-started', 'the-setup-wizard'),
+  action('action-patreon-access', 'Connect Patreon for LDS updates and exclusive plugins',
+    ['patreon', 'membership', 'lds member', 'lds pro', 'members', 'exclusive plugins', 'updates',
+     'update lds', 'custom plugin', 'connect patreon', 'join', 'disconnect'],
+    '/plugins', 'getting-help', 'support-the-project'),
   // ---- Action topics (kind 'action') -------------------------------------
   action('action-edit-reference', 'Edit the reference photo',
     ['edit', 'reference', 'prompt', 'chatgpt', 'nano banana', 'openrouter', 'klein',

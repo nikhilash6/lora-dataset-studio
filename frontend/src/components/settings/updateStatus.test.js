@@ -14,6 +14,7 @@ import {
   zipUpdateHeadline,
   progressPercent,
   progressLabel,
+  patreonUpdateView,
 } from './updateStatus.js';
 
 test('formatMB is compact and empty for unknown sizes', () => {
@@ -118,3 +119,25 @@ test('progressLabel renders each active phase and defers idle/done', () => {
   assert.equal(progressLabel({ phase: 'done' }), null);
   assert.equal(progressLabel({ phase: 'idle' }), null);
 });
+
+test('the Patreon block offers an install only when the server can apply it', () => {
+  const ready = { status: 'ready', release: { version: '2026.10.20' }, update_available: true }
+  assert.equal(patreonUpdateView(null).kind, 'hidden')
+  assert.equal(patreonUpdateView({ status: 'not_configured' }).kind, 'hidden')
+  assert.equal(patreonUpdateView({ status: 'unavailable', message: 'offline' }).text, 'offline')
+  assert.equal(patreonUpdateView({ ...ready, can_apply: true, entitled: true }).kind, 'install')
+  assert.equal(patreonUpdateView({ ...ready, can_apply: false, entitled: false }).kind, 'join')
+  // Docker or local changes: never a button, always the server's reason.
+  const docker = patreonUpdateView({ ...ready, can_apply: false, entitled: true, blocked_reason: 'Docker limit' })
+  assert.deepEqual([docker.kind, docker.reason], ['blocked', 'Docker limit'])
+  assert.equal(patreonUpdateView({ ...ready, can_apply: false, entitled: true }).kind, 'blocked')
+  assert.equal(patreonUpdateView({ ...ready, restart_required: true }).kind, 'restart')
+  // A stale verification is a retry, not an invitation to join.
+  const stale = patreonUpdateView({ ...ready, can_apply: false, entitled: false,
+    access: { status: 'ready', patreon: { linked: true, status: 'verification_required' } } })
+  assert.equal(stale.kind, 'blocked')
+  assert.match(stale.reason, /could not verify/)
+  assert.equal(patreonUpdateView({ status: 'ready', update_available: false, on_channel: true,
+    release: { version: '2026.10.20' } }).text, 'Up to date on the Patreon channel (v2026.10.20).')
+  assert.equal(patreonUpdateView({ status: 'ready', update_available: false }).kind, 'none')
+})

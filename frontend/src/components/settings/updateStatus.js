@@ -88,6 +88,34 @@ export function progressPercent(p) {
   return Math.max(0, Math.min(100, Math.round((p.downloaded || 0) / p.total * 100)))
 }
 
+/* The Patreon channel block of the Updates card, from GET /api/update/patreon.
+   kind: hidden | unavailable | none | current | restart | install | join | blocked.
+   Never offers an install the server said it cannot apply (can_apply). */
+export function patreonUpdateView(p) {
+  if (!p || p.status === 'not_configured') return { kind: 'hidden' }
+  if (p.status !== 'ready') {
+    return { kind: 'unavailable', text: p.message || 'The Patreon update channel could not be checked.' }
+  }
+  if (p.restart_required) {
+    return { kind: 'restart', text: 'A Patreon update is installed. Restart LDS to finish it.' }
+  }
+  const version = p.release?.version ? `LDS v${p.release.version}` : 'A new LDS version'
+  if (!p.update_available) {
+    return p.on_channel
+      ? { kind: 'current', text: `Up to date on the Patreon channel${p.release?.version ? ` (v${p.release.version})` : ''}.` }
+      : { kind: 'none' }
+  }
+  if (p.blocked_reason) return { kind: 'blocked', text: `${version} is available to Patreon members.`, reason: p.blocked_reason }
+  if (p.can_apply) return { kind: 'install', text: `${version} is available with your Patreon membership.` }
+  if (p.access?.patreon?.status === 'verification_required') {
+    return { kind: 'blocked', text: `${version} is available to Patreon members.`,
+      reason: 'Patreon could not verify your membership right now. Check again in a few minutes.' }
+  }
+  if (!p.entitled) return { kind: 'join', text: `${version} is available to Patreon members (LDS Member and LDS Pro).` }
+  return { kind: 'blocked', text: `${version} is available to Patreon members.`,
+    reason: 'This installation cannot apply it right now. Check again later.' }
+}
+
 /* Human phase line for the progress area. Returns null for phases the card
    renders elsewhere (idle/done) so the caller can branch on that. */
 export function progressLabel(p) {

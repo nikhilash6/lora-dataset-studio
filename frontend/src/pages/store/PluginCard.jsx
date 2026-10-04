@@ -8,7 +8,8 @@ import { pendingLabel, pluginActive, pluginDesired } from '../../plugins/lifecyc
 import { productReadiness } from '../../plugins/readiness.js';
 import { pluginSettingsPath } from '../pluginSettings.js';
 import PluginAvatar from './PluginAvatar.jsx';
-import Presentation from './Presentation.jsx';
+import Presentation, { presentationImages } from './Presentation.jsx';
+import { isPatreonRelease } from '../../components/patreon/patreonModel.js';
 
 const BTN = 'min-h-10 rounded-md border border-border px-3 py-1.5 text-sm font-medium transition-colors hover:bg-surface-raised disabled:opacity-50';
 
@@ -36,6 +37,7 @@ export default function PluginCard({ plugin, release, mediaKey, updateAvailable,
   const settingsPath = pluginSettingsPath(plugin.id);
   const experience = installed && pluginActive(plugin) ? plugin.package_contract?.experience : null;
   const details = installed ? plugin.package_contract?.experience : plugin.experience;
+  const patreonProduct = isPatreonRelease(release);
   return (
     <article data-store-product={plugin.id} id={'plugin-row-' + plugin.id} data-plugin-id={installed ? plugin.id : undefined} aria-labelledby={'plugin-title-' + plugin.id}
       className="flex min-w-0 scroll-mt-6 flex-col rounded-xl border border-border-strong bg-surface shadow-sm">
@@ -45,11 +47,14 @@ export default function PluginCard({ plugin, release, mediaKey, updateAvailable,
           <div className="min-w-0">
             <h3 id={'plugin-title-' + plugin.id} className="break-words text-lg font-semibold leading-snug text-content">{plugin.name}</h3>
             <p className="mt-1 text-xs text-content-muted">{installed ? 'Installed' : 'Version'} {plugin.installed_version || plugin.version} · {plugin.official ? 'LDS' : plugin.bundled ? 'Included' : plugin.publisher?.name || plugin.author || 'External'}</p>
+            {patreonProduct && <span className="mt-1.5 inline-flex items-center rounded-full border border-primary/30 bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary" data-patreon-badge>
+              For Patreon members
+            </span>}
           </div>
         </div>
         <span className={'inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium ' + stateClass(installed && pluginActive(plugin) ? 'loaded' : plugin.state || 'disabled')}>
           <span aria-hidden="true" className="h-1.5 w-1.5 rounded-full bg-current" />
-          {installed ? pluginActive(plugin) ? 'Active now' : STATE_LABEL[plugin.state] || plugin.state : release.price?.kind === 'paid' ? 'Paid plugin' : 'Free'}
+          {installed ? pluginActive(plugin) ? 'Active now' : STATE_LABEL[plugin.state] || plugin.state : patreonProduct ? 'Patreon' : release.price?.kind === 'paid' ? 'Paid plugin' : 'Free'}
         </span>
       </header>
       <div className="flex flex-1 flex-col gap-3 px-4 py-4 sm:px-5">
@@ -57,7 +62,8 @@ export default function PluginCard({ plugin, release, mediaKey, updateAvailable,
           <p className="text-sm font-medium text-primary">Update available · {release.manifest.version}</p>
           <div className="mt-2 flex flex-wrap items-center justify-between gap-2">{storeActions}</div>
         </div>}
-        {release && <Presentation key={mediaKey} release={release} />}
+        {/* The Patreon catalog serves no presentation images: no "coming soon" there. */}
+        {release && !(patreonProduct && !presentationImages(release).length) && <Presentation key={mediaKey} release={release} />}
         {pending && <p className="rounded-md border border-primary/30 bg-primary/10 px-3 py-2 text-sm text-content" data-plugin-pending>{pending}</p>}
         {release?.compatibility_issues?.length > 0 && <p className="text-sm text-amber-500">{release.compatibility_issues[0].message}</p>}
         {plugin.description && <p className="text-sm leading-relaxed text-content-muted">{plugin.description}</p>}

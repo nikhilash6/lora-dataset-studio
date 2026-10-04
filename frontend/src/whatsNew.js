@@ -84,6 +84,13 @@ import { SETUP_DEEP_LINK_STEPS } from './hooks/useSetupSteps.js';
 // Newest first. Prepend new waves at the top.
 export const WHATS_NEW = [
   {
+    id: '2026-10-05-patreon-access',
+    date: '2026-10-05',
+    title: 'LDS updates and exclusive plugins on Patreon',
+    blurb: 'New features, exclusive plugins and LDS updates are now reserved for Patreon members (LDS Member and LDS Pro). The version you have stays free and keeps working. Connect Patreon under Plugins → Purchases to install members-only plugins, and update LDS from Settings → Maintenance. LDS Pro members can also request custom plugins.',
+    to: '/plugins?tab=purchases',
+  },
+  {
     id: '2026-09-29-video-plugin-startup',
     date: '2026-09-29',
     title: 'H3 plugins start correctly again',

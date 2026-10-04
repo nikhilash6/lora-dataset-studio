@@ -2,6 +2,8 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Download, LockKeyhole, Search, ShoppingBag } from 'lucide-react';
 import PluginCard from './PluginCard.jsx';
 import { availableUpdateIds, canSelectEntry, catalogEntries, matchesFilter } from './catalogModel.js';
+import { PatreonAccessActions, usePatreonAccess } from '../../components/patreon/PatreonAccess.jsx';
+import { isPatreonRelease, membershipLabel } from '../../components/patreon/patreonModel.js';
 
 const BTN = 'min-h-10 rounded-md border border-border px-3 py-2 text-sm font-medium hover:bg-surface-raised disabled:opacity-50';
 const UPDATE_BTN = 'min-h-10 rounded-md border border-primary bg-primary px-3 py-2 text-sm font-semibold text-gray-950 hover:bg-primary-dark disabled:opacity-50';
@@ -69,14 +71,17 @@ export default function Catalog({ catalog, installed, filter = 'all', onFilterCh
         const incompatible = Boolean(release?.compatibility_issues?.length);
         const pending = Boolean(plugin?.pending_action);
         const paid = release?.price?.kind === 'paid';
+        // Patreon products install through the ordinary review; it asks for
+        // the membership when this installation does not have one.
+        const patreonProduct = isPatreonRelease(release);
         const needsAdmin = catalog?.can_manage === false && !pending && !incompatible;
         const action = (reinstall = false) => <button type="button" role={reinstall ? 'menuitem' : undefined}
           className={(product?.update_available && !reinstall ? UPDATE_BTN : BTN) + ' inline-flex items-center gap-2'}
           disabled={busy || loading || pending || incompatible || catalog?.status !== 'ready' || (!catalog?.can_manage && !(needsAdmin && onUnlock))}
           onClick={() => needsAdmin ? onUnlock?.() : onPlan(id, manifest.version)}>
           {needsAdmin ? <LockKeyhole className="h-4 w-4" aria-hidden="true" />
-            : paid && !plugin ? <ShoppingBag className="h-4 w-4" aria-hidden="true" /> : <Download className="h-4 w-4" aria-hidden="true" />}
-          {needsAdmin ? 'Unlock installation' : pending ? 'Change pending' : reinstall ? 'Reinstall' : product?.update_available ? 'Update' : paid ? 'Review purchase' : 'Install'}
+            : paid && !plugin && !patreonProduct ? <ShoppingBag className="h-4 w-4" aria-hidden="true" /> : <Download className="h-4 w-4" aria-hidden="true" />}
+          {needsAdmin ? 'Unlock installation' : pending ? 'Change pending' : reinstall ? 'Reinstall' : product?.update_available ? 'Update' : paid && !patreonProduct ? 'Review purchase' : 'Install'}
         </button>;
         return <PluginCard key={id} plugin={plugin} release={release}
           mediaKey={`${manifest?.version}:${catalog?.checked_at || ''}`} updateAvailable={product?.update_available}
@@ -102,7 +107,18 @@ export default function Catalog({ catalog, installed, filter = 'all', onFilterCh
   </div>;
 }
 
-export function InstallPlan({ plan, busy, onConfirm, onCancel, onAcquire, restart }) {
+function PatreonPlanAccess({ names, adminToken, initial, busy, onRecheck }) {
+  const state = usePatreonAccess(adminToken, initial);
+  return <div className="space-y-2 rounded-lg border border-primary/40 p-3" role="status" data-patreon-required>
+    <p className="text-sm">{names.join(', ')} {names.length === 1 ? 'is' : 'are'} available to Patreon members (LDS Member and LDS Pro).
+      Installed plugins keep working; new downloads and updates need an active membership.</p>
+    <p className="text-sm text-content-muted">{state.access ? membershipLabel(state.access) : 'Checking Patreon…'}</p>
+    <PatreonAccessActions state={state} compact />
+    {onRecheck && <button type="button" className={BTN} disabled={busy} onClick={onRecheck}>Check again</button>}
+  </div>;
+}
+
+export function InstallPlan({ plan, busy, onConfirm, onCancel, onAcquire, restart, adminToken = '', onRecheck }) {
   const panelRef = useRef(null);
   useEffect(() => {
     // The review sits above the catalog, often outside the viewport of the
@@ -113,6 +129,9 @@ export function InstallPlan({ plan, busy, onConfirm, onCancel, onAcquire, restar
     panel.focus({ preventScroll: true });
   }, [plan]);
   const purchase = plan.purchase_required?.length > 0;
+  const patreonRequired = plan.patreon_required || [];
+  const otherPurchase = (plan.purchase_required || []).filter(id => !patreonRequired.includes(id));
+  const nameOf = id => plan.packages.find(item => item.manifest.id === id)?.manifest?.name || id;
   return <section ref={panelRef} role="region" aria-label="Review plugin installation" tabIndex={-1} className="space-y-4 rounded-xl border border-primary/40 bg-surface p-5" data-store-plan>
     <h2 className="text-lg font-semibold">{purchase ? 'Review your plugins' : plan.update_only ? 'Ready to update all' : 'Ready to install'}</h2>
     <ul className="divide-y divide-border">
@@ -127,11 +146,13 @@ export function InstallPlan({ plan, busy, onConfirm, onCancel, onAcquire, restar
     <p className="text-sm text-content-muted">{plan.update_only
       ? `Your data and activation settings are kept. All updates are verified and prepared together. ${restart?.can_apply ? 'LDS will restart automatically once, then reload this page.' : restart?.how || 'Restart LDS once after preparation to apply all updates.'}`
       : 'Your data is kept. All listed plugins are prepared together and applied in one restart. The current features stay available until you apply the changes and restart LDS.'}</p>
-    {purchase && <p role="status" className="text-sm text-content-muted">Open Purchases to connect this installation, activate a license or review the purchase terms for: {plan.purchase_required.join(', ')}.</p>}
+    {otherPurchase.length > 0 && <p role="status" className="text-sm text-content-muted">Open Purchases to connect this installation, activate a license or review the purchase terms for: {otherPurchase.join(', ')}.</p>}
+    {patreonRequired.length > 0 && <PatreonPlanAccess names={patreonRequired.map(nameOf)} adminToken={adminToken}
+      initial={plan.patreon_access} busy={busy} onRecheck={onRecheck} />}
     {plan.paid_packages?.length > 0 && !purchase && <p className="text-sm text-content-muted">Your acquisition is linked. Download eligibility for these versions will be verified before preparing the installation.</p>}
     <div className="flex flex-wrap gap-2">
       <button type="button" disabled={busy || purchase || !plan.packages.length} className={BTN + ' border-primary bg-primary text-primary-foreground'} onClick={onConfirm}>{busy ? 'Downloading and preparing…' : plan.update_only ? restart?.can_apply ? 'Update all and restart' : 'Update all' : 'Confirm installation'}</button>
-      {purchase && onAcquire && <button type="button" disabled={busy} className={BTN} onClick={() => onAcquire(plan.purchase_required[0])}>Open purchases</button>}
+      {otherPurchase.length > 0 && onAcquire && <button type="button" disabled={busy} className={BTN} onClick={() => onAcquire(otherPurchase[0])}>Open purchases</button>}
       <button type="button" disabled={busy} className={BTN} onClick={onCancel}>Cancel</button>
     </div>
   </section>;

@@ -4,6 +4,7 @@ import DiagnosticReport from '../common/DiagnosticReport'
 import DockerUpdateInstructions from '../common/DockerUpdateInstructions'
 import PinokioUpdateInstructions from '../common/PinokioUpdateInstructions'
 import { installMode, zipUpdateHeadline, progressLabel, progressPercent } from './updateStatus'
+import PatreonUpdates from '../patreon/PatreonUpdates'
 import { Card } from './primitives'
 import { versionLabel } from '../../utils/versionLabel'
 import UsageStatisticsCard from './UsageStatisticsCard'
@@ -19,6 +20,11 @@ function UpdatesCard() {
   const [applying, setApplying] = useState(false)
   const [phase, setPhase] = useState('')     // '' | 'pulling' | 'restarting'
   const [progress, setProgress] = useState(null)   // ZIP mode: {phase, downloaded, total}
+  // Patreon core channel (GET /api/update/patreon). Null while unknown or when
+  // this session may not manage it; the public card then works as before.
+  const [patreon, setPatreon] = useState(null)
+  const [patreonError, setPatreonError] = useState('')
+  const [patreonInstalled, setPatreonInstalled] = useState(null)
 
   // Same cached Git/release check as the nav badge and banner, so a Git clone
   // never advertises a release ZIP instead of its configured branch.
@@ -27,13 +33,24 @@ function UpdatesCard() {
     apiFetch('/api/update/check?auto=1', { background: true })
       .then((d) => { if (alive) setStatus((prev) => prev || d) })
       .catch(() => { /* best-effort — the manual button stays available */ })
+    apiFetch('/api/update/patreon', { background: true })
+      .then((d) => { if (alive) setPatreon((prev) => prev || d) })
+      .catch(() => { /* not administered here, or offline: the public card stands */ })
     return () => { alive = false }
   }, [])
+
+  const checkPatreon = async () => {
+    try {
+      setPatreon(await apiFetch('/api/update/patreon?force=1', { background: true }))
+      setPatreonError('')
+    } catch { /* keep the last answer; the public check reports connectivity */ }
+  }
 
   const check = async () => {
     setChecking(true)
     try {
-      setStatus(await apiFetch('/api/update/check?force=1'))
+      const [publicStatus] = await Promise.all([apiFetch('/api/update/check?force=1'), checkPatreon()])
+      setStatus(publicStatus)
     } catch (e) {
       setStatus({ ok: false, reason: e.message || 'Check failed' })
     } finally {
@@ -100,6 +117,30 @@ function UpdatesCard() {
       }
     } catch (e) {
       setStatus({ ok: false, reason: e.message || 'Update failed' })
+      setApplying(false); setPhase('')
+    }
+  }
+
+  // The Patreon channel installs through the same restart / progress flows:
+  // git and Pinokio fast-forward a verified bundle, a ZIP install swaps the
+  // verified archive. Pinokio keeps its own Stop / Update / Start.
+  const applyPatreon = async () => {
+    setApplying(true); setPhase('pulling'); setProgress(null); setPatreonError('')
+    try {
+      const res = await postJson('/api/update/patreon/apply', {})
+      if (res.restarting) {
+        setPhase('restarting')
+        waitForHealthAndReload()
+      } else if (res.async) {
+        setProgress({ phase: 'downloading', downloaded: 0, total: res.total || 0 })
+        pollProgress()
+      } else {
+        if (res.restart_required) setPatreonInstalled(res)
+        else if (!res.changed) await checkPatreon()
+        setApplying(false); setPhase('')
+      }
+    } catch (e) {
+      setPatreonError(e.message || 'The Patreon update could not be installed. Your files were not changed.')
       setApplying(false); setPhase('')
     }
   }
@@ -222,6 +263,9 @@ function UpdatesCard() {
           )}
         </div>
       )}
+
+      <PatreonUpdates patreon={patreon} installed={patreonInstalled} error={patreonError}
+        applying={applying} onApply={applyPatreon} onChanged={checkPatreon} />
     </Card>
   )
 }

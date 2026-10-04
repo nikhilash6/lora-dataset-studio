@@ -1,7 +1,13 @@
 import { useState } from 'react';
+import { Link } from 'react-router';
 import { Heart, X } from 'lucide-react';
+import { PATREON_ACCESS_SUMMARY, PATREON_PRO_SUMMARY } from '../patreon/patreonModel.js';
 
-const DISMISSED_KEY = 'lds:support-notice-dismissed';
+// A new key on purpose: this notice now announces Patreon access, so people
+// who dismissed the earlier support appeal ('lds:support-notice-dismissed')
+// see the announcement once. That older key is left untouched.
+const DISMISSED_KEY = 'lds:patreon-access-notice-dismissed';
+const PATREON_PAGE = 'https://www.patreon.com/c/Loraperfectgf';
 
 export default function SupportProjectNotice() {
   const [dismissed, setDismissed] = useState(() => {
@@ -18,26 +24,26 @@ export default function SupportProjectNotice() {
   };
 
   return (
-    <aside aria-label="Support LDS development"
+    <aside aria-label="LDS updates on Patreon"
       className="flex items-start gap-3 rounded-lg border border-border bg-surface-raised px-4 py-3">
       <Heart aria-hidden="true" className="mt-0.5 h-4 w-4 shrink-0 text-content-muted" />
       <div className="min-w-0 flex-1">
-        <p className="text-sm font-medium text-content">Help keep LDS development going</p>
+        <p className="text-sm font-medium text-content">LDS updates now come through Patreon</p>
         <p className="mt-0.5 text-xs leading-relaxed text-content-muted">
-          Monthly support on Patreon helps fund continued development. Even €1 a month makes a difference.
+          {PATREON_ACCESS_SUMMARY} {PATREON_PRO_SUMMARY}
         </p>
         <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1">
-          <a href="https://www.patreon.com/c/Loraperfectgf" target="_blank" rel="noopener noreferrer"
+          <a href={PATREON_PAGE} target="_blank" rel="noopener noreferrer"
             className="inline-flex min-h-8 items-center rounded-md border border-primary/25 bg-primary/10 px-3 py-1 text-xs font-medium text-content no-underline transition-colors hover:bg-primary/20 focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary">
-            Support monthly on Patreon
+            Join on Patreon
           </a>
-          <a href="https://github.com/sponsors/perfectgf" target="_blank" rel="noopener noreferrer"
+          <Link to="/plugins?tab=purchases"
             className="inline-flex min-h-8 items-center text-xs text-content-muted underline underline-offset-4 hover:text-content">
-            GitHub Sponsors
-          </a>
+            Already a member? Connect Patreon
+          </Link>
         </div>
       </div>
-      <button type="button" onClick={dismiss} aria-label="Dismiss support message"
+      <button type="button" onClick={dismiss} aria-label="Dismiss Patreon announcement"
         title="Hide this message"
         className="-mr-1 -mt-1 inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-content-muted hover:bg-surface-raised hover:text-content">
         <X aria-hidden="true" className="h-4 w-4" />
