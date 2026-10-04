@@ -40,6 +40,7 @@
 |---|---|
 | [Releases](https://github.com/perfectgf/lora-dataset-studio/releases) and [changelog](../CHANGELOG.md) | Current release notes and historical improvements |
 | [Plugin authoring](plugins/README.md) | SDK, package layout, compatibility and building plugins |
+| [Patreon access](plugins/patreon-access.md) | Members-only plugins and LDS updates, per installation type, with their limits |
 | [Contributing](../CONTRIBUTING.md) | Development setup, tests and pull-request conventions |
 | [Code of Conduct](../CODE_OF_CONDUCT.md) | Community expectations |
 | [License](../LICENSE) | PolyForm Noncommercial License 1.0.0 |

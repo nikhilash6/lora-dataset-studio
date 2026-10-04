@@ -9,7 +9,10 @@ Build, curate, caption and train image datasets from one browser interface. LDS 
 
 [Install](#setup--install) · [Documentation](docs/README.md) · [Plugins](#plugins) · [Releases](https://github.com/perfectgf/lora-dataset-studio/releases) · [Discord](https://discord.gg/j6hnJBFtXE)
 
-The core and public plugins are free under the [PolyForm Noncommercial license](LICENSE). The core needs no account; optional usage statistics are off by default. External APIs and rented GPUs have their own charges. Additional paid plugins may be offered later.
+> [!IMPORTANT]
+> **LDS updates now come through Patreon.** New features, exclusive plugins and LDS updates are reserved for [Patreon](https://www.patreon.com/c/Loraperfectgf) members (**LDS Member** and **LDS Pro**). The version you have stays free and keeps working. LDS Pro members can also request custom plugins.
+
+The current core and public plugins are free under the [PolyForm Noncommercial license](LICENSE), and running them needs no account; optional usage statistics are off by default. External APIs and rented GPUs have their own charges. A Patreon membership is needed for new versions and exclusive plugins, not to keep using the version you have.
 
 <table>
   <tr>
@@ -102,7 +105,7 @@ Complete **Setup**, then create a dataset or install the plugins you need. Impor
 | Pinokio | [One-click installation](docs/guide/installation.md#pinokio) |
 | Rented RunPod GPU | [RunPod guide](docs/guide/runpod.md) |
 
-**Updates:** ZIP installations use **Update & restart** and retain their datasets, media, settings and history. Git installations follow their configured branch; `v2` is maintained, while `v1` is frozen. Old `main` installations must [migrate to V2](docs/guide/migrate-to-v2.md). Pinokio and Docker use their own [update procedures](docs/guide/installation.md).
+**Updates:** new LDS versions are reserved for Patreon members and install from **Settings → Maintenance → Updates**. Git and Pinokio checkouts fast-forward to a verified release; ZIP installations swap in a verified archive and retain their datasets, media, settings and history. Docker installations cannot apply Patreon releases yet. Without a membership, the installed version keeps working; `v1` is frozen and old `main` installations must [migrate to V2](docs/guide/migrate-to-v2.md). Pinokio and Docker keep their own [update procedures](docs/guide/installation.md).
 
 ### Minimum requirements
 
@@ -125,7 +128,7 @@ Optional usage statistics are off by default. Update checks, requested model dow
 
 ## Support the project
 
-[GitHub Sponsors](https://github.com/sponsors/perfectgf) supports development, API testing and rented test GPUs. Bug reports, contributions and sharing the project also help. For support, generate a diagnostic report under **Guide → Getting help**, then use [Discord](https://discord.gg/j6hnJBFtXE) or [GitHub issues](https://github.com/perfectgf/lora-dataset-studio/issues).
+A [Patreon](https://www.patreon.com/c/Loraperfectgf) membership (LDS Member or LDS Pro) funds development and includes new features, exclusive plugins and LDS updates; LDS Pro members can also request custom plugins. [GitHub Sponsors](https://github.com/sponsors/perfectgf) also supports development, API testing and rented test GPUs. Bug reports, contributions and sharing the project also help. For support, generate a diagnostic report under **Guide → Getting help**, then use [Discord](https://discord.gg/j6hnJBFtXE) or [GitHub issues](https://github.com/perfectgf/lora-dataset-studio/issues).
 
 **Affiliate disclosure:** the project's [vast.ai links](https://cloud.vast.ai/?ref_id=683073) pay the project 3% of referred users' spending for the lifetime of their account, at no extra cost. Rentals use your own API key and are billed directly by vast.ai. This is separate from optional usage statistics.
 

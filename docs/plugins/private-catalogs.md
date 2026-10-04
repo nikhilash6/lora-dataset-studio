@@ -76,6 +76,10 @@ Older clients ignore `first_party_ids` and retain the external plugin's updates;
 the updated core applies the same explicit first-party permissions described
 above. Do not combine `first_party_ids` and `official_ids` in one source.
 
+The Patreon catalog shipped with the app is configured separately; see
+[Patreon access](patreon-access.md). An identifier listed here stays with this
+source even when the Patreon catalog is also authorized for it.
+
 Use `store/tools/repository.py` to publish immutable package versions. Keep
 signing keys outside the served directory. Private sources and their packages
 do not belong in the public LDS checkout. The ordinary app updater continues
