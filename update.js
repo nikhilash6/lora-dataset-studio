@@ -8,13 +8,18 @@
 
    The launcher's Update tab is offered only while the server is stopped (see
    pinokio.js) — updating a running tree then restarting from Pinokio is the
-   clean order. */
+   clean order.
+
+   A checkout the app moved onto the Patreon channel is AHEAD of the public
+   branch, so the public pull may refuse to fast-forward. The fallback only
+   accepts that refusal when the Patreon marker the app writes is part of HEAD;
+   the requirements step then still installs what that release needs. */
 module.exports = {
   run: [
     {
       method: "shell.run",
       params: {
-        message: "git pull --ff-only"
+        message: "git pull --ff-only || git merge-base --is-ancestor refs/lds/patreon/installed HEAD"
       }
     },
     {

@@ -11,7 +11,9 @@ from .client import StoreError, StoreNotConfigured
 bp = Blueprint('plugin_store', __name__, url_prefix='/store')
 
 from .commerce import register_commerce_routes  # noqa: E402
+from .patreon import register_patreon_routes  # noqa: E402
 register_commerce_routes(bp)
+register_patreon_routes(bp)
 
 
 def _input(*, confirmation=False):

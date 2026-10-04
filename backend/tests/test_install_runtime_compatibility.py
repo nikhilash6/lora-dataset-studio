@@ -39,10 +39,10 @@ ROOT = Path(__file__).resolve().parents[2]
 
 @pytest.mark.parametrize('name', ['Dockerfile', 'Dockerfile.gpu'])
 def test_images_include_the_public_store_trust_files(name):
-    # Copy only the two public bootstrap files, never an operator's store tree.
+    # Copy only the shipped public store files, never an operator's store tree.
     source = (ROOT / name).read_text(encoding='utf-8')
-    assert 'COPY store/bootstrap.json store/public-root.json store/' in source
-    for name in ('bootstrap.json', 'public-root.json'):
+    assert 'COPY store/bootstrap.json store/public-root.json store/patreon.json store/' in source
+    for name in ('bootstrap.json', 'public-root.json', 'patreon.json'):
         assert (ROOT / 'store' / name).is_file()
 
 

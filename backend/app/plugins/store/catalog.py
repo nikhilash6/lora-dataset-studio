@@ -72,6 +72,11 @@ def parse_catalog(data, config):
                     raise ValueError('invalid price')
                 if price['kind'] == 'paid' and (not isinstance(price.get('product'), str) or not price['product']):
                     raise ValueError('invalid commerce product')
+                # Only the operator-configured Patreon source may label a
+                # release as a Patreon product; that source sells nothing else.
+                patreon = getattr(config, 'provider', '') == 'patreon'
+                if patreon != (price.get('provider') == 'patreon') or (patreon and price['kind'] != 'paid'):
+                    raise ValueError('invalid Patreon release')
                 changelog = release.get('changelog', [])
                 if not isinstance(changelog, list) or any(not isinstance(s, str) for s in changelog):
                     raise ValueError('invalid changelog')

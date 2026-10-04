@@ -23,7 +23,7 @@ LOCAL_DIRS = {'extensions', '__pycache__', 'node_modules', 'tests', 'data',
               'bundled', 'venv', '.venv', '.pytest_cache'}
 ARCHIVE_SUFFIXES = ('.zip', '.whl', '.tar', '.gz', '.bz2', '.xz', '.tgz',
                     '.tbz2', '.txz', '.7z', '.rar', '.pyz')
-PUBLIC_STORE_FILES = {'store/bootstrap.json', 'store/public-root.json'}
+PUBLIC_STORE_FILES = {'store/bootstrap.json', 'store/public-root.json', 'store/patreon.json'}
 REQUIRED = ROOT_FILES | {'backend/run.py', 'backend/requirements.txt',
                         'backend/app/version.py', 'backend/lds_sdk/__init__.py',
                         'frontend/dist/index.html', 'scripts/bootstrap_python.ps1'} | PUBLIC_STORE_FILES

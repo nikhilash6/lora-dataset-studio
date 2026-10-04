@@ -23,6 +23,7 @@ from __future__ import annotations
 from ..timeout_settings import network_timeout, processing_timeout
 
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -141,6 +142,49 @@ def current_sha(root=None):
         return None
 
 
+# Written by the Patreon channel (services/patreon_core.py) when it fast-forwards
+# this checkout to a verified Patreon release. While HEAD contains that commit
+# and the public branch does not, the checkout is AHEAD of the public branch:
+# neither the public status nor the history resync may treat it as behind.
+PATREON_MARKER_REF = 'refs/lds/patreon/installed'
+PATREON_CHANNEL_REASON = ('This installation follows the Patreon update channel. Install its updates '
+                          'from Settings › Maintenance; public changes arrive with the next Patreon release.')
+
+
+def _is_ancestor(root, ancestor, descendant) -> bool:
+    try:
+        return _git(root, 'merge-base', '--is-ancestor', ancestor, descendant).returncode == 0
+    except (FileNotFoundError, subprocess.SubprocessError):
+        return False
+
+
+def patreon_marker(root=None):
+    """Full SHA of the last Patreon release fast-forwarded here, or None."""
+    try:
+        out = _git(root or REPO_ROOT, 'rev-parse', '--verify', '--quiet', PATREON_MARKER_REF + '^{commit}')
+    except (FileNotFoundError, subprocess.SubprocessError):
+        return None
+    sha = (out.stdout or '').strip()
+    return sha if out.returncode == 0 and re.fullmatch(r'[0-9a-f]{40}|[0-9a-f]{64}', sha) else None
+
+
+def on_patreon_channel(root=None, branch=None) -> bool:
+    """True while HEAD carries a Patreon release that origin/<branch> lacks.
+
+    Fails closed: an unreadable remote branch counts as "lacks", so a missing
+    or broken upstream can never unlock a reset onto the public history."""
+    root = root or REPO_ROOT
+    marker = patreon_marker(root)
+    if not marker or not _is_ancestor(root, marker, 'HEAD'):
+        return False
+    if branch is None:
+        try:
+            branch = (_git(root, 'rev-parse', '--abbrev-ref', 'HEAD').stdout or '').strip() or 'main'
+        except (FileNotFoundError, subprocess.SubprocessError):
+            return True
+    return not _is_ancestor(root, marker, f'origin/{branch}')
+
+
 def git_update_status(root=None) -> dict | None:
     """`git fetch` + how many commits behind the upstream branch we are. None when this
     isn't a git checkout (caller then uses the release-tag check). Network/git failures
@@ -155,6 +199,14 @@ def git_update_status(root=None) -> dict | None:
         fetch = _git(root, 'fetch', '--quiet', 'origin', branch)
         if fetch.returncode != 0:
             base['reason'] = 'git fetch failed (offline, or no access to the remote).'
+            return base
+        if on_patreon_channel(root, branch):
+            # Ahead on the Patreon channel: public commits are not an update
+            # for this checkout (they diverge from it), and offering them would
+            # lead to the history resync below. services/patreon_core reports
+            # the channel's own releases.
+            base.update(branch=branch, channel='patreon', behind=0,
+                        current_sha=(_git(root, 'rev-parse', '--short', 'HEAD').stdout or '').strip())
             return base
         behind = (_git(root, 'rev-list', '--count', f'HEAD..origin/{branch}').stdout or '0').strip()
         base['branch'] = branch
@@ -247,8 +299,14 @@ def _resync_rewritten_history(root, branch):
     update failing with an explanation than destroy something to make it succeed.
     Untracked files are never touched by reset --hard, so they don't block it.
 
+    A third refusal protects the Patreon channel: a checkout ahead on it is
+    never moved back to the public branch, even when one public commit happens
+    to share HEAD's tree (the public tip may no longer contain that content).
+
     Returns the new HEAD sha on success, None when it isn't provably safe."""
     try:
+        if on_patreon_channel(root, branch):
+            return None
         dirty = (_git(root, 'status', '--porcelain', '--untracked-files=no').stdout or '').strip()
         if dirty:
             return None
@@ -279,6 +337,8 @@ def apply_update(root=None) -> dict:
                 'url': f'https://github.com/{repo}/releases'}
     try:
         branch = (_git(root, 'rev-parse', '--abbrev-ref', 'HEAD').stdout or '').strip() or 'main'
+        if on_patreon_channel(root, branch):
+            return {'ok': False, 'channel': 'patreon', 'reason': PATREON_CHANNEL_REASON}
         before = (_git(root, 'rev-parse', 'HEAD').stdout or '').strip()
         pull = _git(root, 'pull', '--ff-only', 'origin', branch)
     except FileNotFoundError:
@@ -454,7 +514,8 @@ def apply_release_files(staged_root, repo_root, backup_root) -> list[str]:
         raise
 
 
-def apply_zip_update(root=None, *, release=None, on_progress=None) -> dict:
+def apply_zip_update(root=None, *, release=None, on_progress=None, download=None,
+                     before_install=None) -> dict:
     """Release-ZIP update for a NON-git install: resolve the latest release,
     download its ZIP asset, extract it, and swap the app's files in place
     (backing up the old ones; rolling back on failure). Restart is scheduled by
@@ -466,7 +527,12 @@ def apply_zip_update(root=None, *, release=None, on_progress=None) -> dict:
     async worker does, to size the progress bar). `on_progress(phase, done, total)`
     is called through the phases ('downloading' with byte counts, then
     'extracting', 'installing') so the UI can show a real progress bar — a release
-    ZIP is tens of MB, far slower than a git pull."""
+    ZIP is tens of MB, far slower than a git pull.
+
+    `download(dest, on_bytes)` replaces the public asset download (the Patreon
+    channel streams a granted, TUF-verified archive instead). `before_install()`
+    runs after the archive is extracted and checked, right before the first file
+    moves; an exception there aborts with nothing replaced."""
     root = Path(root or REPO_ROOT)
     from ..version import APP_VERSION
     from ..config import data_dir
@@ -478,7 +544,7 @@ def apply_zip_update(root=None, *, release=None, on_progress=None) -> dict:
         return {'ok': False, 'reason': 'the latest release has no version tag to update to.'}
     if not (latest > APP_VERSION):          # date-based versions -> plain string comparison
         return {'ok': True, 'changed': False, 'from': APP_VERSION, 'to': latest}
-    if not rel.get('zip_url'):
+    if not rel.get('zip_url') and download is None:
         repo = _cfg_get('updates.repo') or 'perfectgf/lora-dataset-studio'
         return {'ok': False, 'manual': True,
                 'reason': 'the latest release published no downloadable ZIP asset.',
@@ -499,9 +565,14 @@ def apply_zip_update(root=None, *, release=None, on_progress=None) -> dict:
     work.mkdir(parents=True, exist_ok=True)
     zip_path, staging, backup = work / 'release.zip', work / 'staging', work / 'backup'
 
+    def on_bytes(done, total):
+        _emit('downloading', done, total or rel.get('zip_size') or 0)
+
     try:
-        _download_file(rel['zip_url'], zip_path,
-                       on_progress=lambda d, t: _emit('downloading', d, t or rel.get('zip_size') or 0))
+        if download is not None:
+            download(zip_path, on_bytes)
+        else:
+            _download_file(rel['zip_url'], zip_path, on_progress=on_bytes)
     except Exception as exc:
         return {'ok': False, 'reason': f'download failed: {exc}'}
     _emit('extracting')
@@ -517,6 +588,11 @@ def apply_zip_update(root=None, *, release=None, on_progress=None) -> dict:
         return {'ok': False,
                 'reason': 'the release archive is missing backend/ — refusing to swap.'}
     deps_changed = _requirements_changed(app_root, root)
+    if before_install is not None:
+        try:
+            before_install()
+        except Exception as exc:
+            return {'ok': False, 'reason': str(exc) or 'the update could not start installing.'}
 
     # Move out of any directory being replaced before the swap: after an in-app
     # restart the process CWD is backend/, and Windows refuses to move the CWD or
@@ -633,7 +709,38 @@ def start_zip_update(root=None) -> dict:
             'total': rel.get('zip_size') or 0}
 
 
-def _run_zip_update(root, rel) -> None:
+def start_verified_zip_update(root, rel, *, download, reserve) -> dict:
+    """Async ZIP update whose bytes come from `download` (the Patreon channel).
+
+    Same progress state, file swap, backup and restart as the public ZIP path.
+    `reserve()` runs in the worker right before the swap and must return the
+    idle gate it froze (plugins/restart.py); the worker keeps that gate until
+    the process exits, or releases it when nothing was installed."""
+    root = Path(root or REPO_ROOT)
+    from ..version import APP_VERSION
+    with _zip_lock:
+        if _restart_scheduled:
+            return {'ok': False, 'restarting': True,
+                    'reason': 'A server restart is already scheduled; try again after it returns.'}
+        if _zip_state.get('phase') in _ACTIVE_PHASES:
+            return {'ok': False, 'reason': 'Another update is already in progress.'}
+        _zip_state.clear()
+        _zip_state.update(phase='downloading', downloaded=0, total=rel.get('zip_size') or 0,
+                          **{'from': APP_VERSION, 'to': rel['version']})
+    try:
+        threading.Thread(target=_run_zip_update, args=(root, rel),
+                         kwargs={'download': download, 'reserve': reserve}, daemon=True).start()
+    except Exception as exc:
+        reason = f'The update worker could not start: {exc}'
+        with _zip_lock:
+            _zip_state.update(phase='error', error=reason, changed=False,
+                              restart_required=False, rolled_back=False)
+        return {'ok': False, 'async': False, 'reason': reason}
+    return {'ok': True, 'async': True, 'from': APP_VERSION, 'to': rel['version'],
+            'total': rel.get('zip_size') or 0}
+
+
+def _run_zip_update(root, rel, *, download=None, reserve=None) -> None:
     """Worker body: run the update, mirror its phase into `_zip_state`, and on
     success schedule the restart. Apply failures land as phase ``error`` after
     their rollback; a later restart-scheduling failure instead records that the
@@ -645,7 +752,17 @@ def _run_zip_update(root, rel) -> None:
                 _zip_state['total'] = total
             if done:
                 _zip_state['downloaded'] = done
-    res = apply_zip_update(root, release=rel, on_progress=cb)
+    held = []
+
+    def before_install():
+        held.append(reserve())
+
+    res = apply_zip_update(root, release=rel, on_progress=cb, download=download,
+                           before_install=before_install if reserve is not None else None)
+    gate = held[0] if held else None
+    if gate is not None and not (res.get('ok') and res.get('changed')):
+        gate.release()  # Same thread as reserve(): nothing was installed.
+        gate = None
     with _zip_lock:
         if res.get('ok') and res.get('changed'):
             _zip_state.update(phase='restarting', deps_changed=bool(res.get('deps_changed')))
@@ -669,6 +786,10 @@ def _run_zip_update(root, rel) -> None:
             with _zip_lock:
                 _zip_state.update(phase='error', error=reason, changed=True,
                                   restart_required=True, rolled_back=False)
+        if gate is not None:
+            # New files are in place under old imports: admit no new work
+            # until this process exits (the restart, or a manual one).
+            gate.finished.wait()
 
 
 def _dependency_install_command(root=None, executable=None) -> list[str]:

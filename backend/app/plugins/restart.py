@@ -22,6 +22,9 @@ _TOKEN = '_lds_plugin_mutation'
 _BUSY = 'Work is still running or being admitted. Let it finish before applying plugin changes.'
 _RESTARTING = 'LDS is restarting. Wait for it to reconnect before making changes.'
 _ACTIVE_QUEUE = ('pending', 'processing', 'sent_to_comfy', 'cancel_requested', 'stalled')
+# Routes that freeze the gate themselves. Counting them as writers would make
+# their own request look like the work they wait for.
+_SELF_GATED = ('/api/plugins/apply', '/api/update/patreon/apply')
 
 
 class RestartBlocked(RuntimeError):
@@ -35,6 +38,7 @@ class _Gate:
         self.frozen = False
         self.held = []
         self.finished = threading.Event()
+        self.message = _RESTARTING
 
     def freeze(self):
         with self.lock:
@@ -58,6 +62,7 @@ class _Gate:
         self.held.clear()
         with self.lock:
             self.frozen = False
+            self.message = _RESTARTING
         self.finished.set()
 
 
@@ -71,11 +76,11 @@ def install_gate(app):
     def plugin_restart_admission():
         if request.method in ('GET', 'HEAD', 'OPTIONS'):
             return None
-        if request.method == 'POST' and request.path.rstrip('/') == '/api/plugins/apply':
+        if request.method == 'POST' and request.path.rstrip('/') in _SELF_GATED:
             return None
         with gate.lock:
             if gate.frozen:
-                return jsonify(error=_RESTARTING, code='restarting'), 503
+                return jsonify(error=gate.message, code='restarting'), 503
             token = object()
             gate.writers.add(token)
             setattr(g, _TOKEN, token)
@@ -110,7 +115,7 @@ def _plugin_blockers(registry, changes=()):
             check('plugin.disable_blockers', plugin['id'])
 
 
-def _lock_and_check_work(gate, registry, changes=()):
+def _lock_and_check_work(gate, registry, changes=(), action='applying plugin changes'):
     from .. import setup_installer
     from ..extensions import db
     from ..gpu_window import vision_gpu_window_blocks_gpu
@@ -131,7 +136,7 @@ def _lock_and_check_work(gate, registry, changes=()):
         gate.acquire(runner.lock)
         state = runner.status()
         if runner._busy() or (state and (state.get('enabled') or state.get('draining') or state.get('job_id'))):
-            raise RestartBlocked('Stop Auto continuation and let its current clip finish before applying plugin changes.')
+            raise RestartBlocked(f'Stop Auto continuation and let its current clip finish before {action}.')
 
     # Match the existing local launch order. The remaining acquisitions never
     # block, so an older request/worker with a different order cannot deadlock.
@@ -143,28 +148,50 @@ def _lock_and_check_work(gate, registry, changes=()):
     # A terminal queue row may still be copying/associating its result. The
     # execution reservation covers that tail without holding the GPU lock.
     if queue_execution_busy():
-        raise RestartBlocked('A generation result is still being finalized. Let it finish before applying plugin changes.')
+        raise RestartBlocked(f'A generation result is still being finalized. Let it finish before {action}.')
     if any(not job.get('finished') for job in bank_jobs._jobs.values()):
-        raise RestartBlocked('A bank operation is still running. Let it finish before applying plugin changes.')
+        raise RestartBlocked(f'A bank operation is still running. Let it finish before {action}.')
     if ollama_control._pull and ollama_control._pull.get('state') == 'running':
-        raise RestartBlocked('An Ollama model is still downloading. Let it finish before applying plugin changes.')
+        raise RestartBlocked(f'An Ollama model is still downloading. Let it finish before {action}.')
     if any(dataset_activity._active.values()):
-        raise RestartBlocked('A dataset operation is still running. Let it finish before applying plugin changes.')
+        raise RestartBlocked(f'A dataset operation is still running. Let it finish before {action}.')
     if any(candidate.get('status') == 'running' for job in reference_edit_jobs._jobs.values()
            for candidate in job.get('candidates', {}).values()):
-        raise RestartBlocked('A reference edit is still running. Let it finish before applying plugin changes.')
+        raise RestartBlocked(f'A reference edit is still running. Let it finish before {action}.')
     if (any(run.get('state') in ('running', 'queued') for run in setup_installer._runs.values())
             or setup_installer._pip_current is not None or setup_installer._pip_queue
             or any(environment._RUNNING.values())):
-        raise RestartBlocked('An installation or plugin script is still running. Let it finish before applying plugin changes.')
+        raise RestartBlocked(f'An installation or plugin script is still running. Let it finish before {action}.')
     if (vision_gpu_window_blocks_gpu()
             or queue_manager._get_system_state('training_in_progress')
             or queue_manager._get_system_state('vision_in_progress')
             or lora_training.get_train_queue()
             or ImageGenerationQueue.query.filter(ImageGenerationQueue.status.in_(_ACTIVE_QUEUE)).first()):
-        raise RestartBlocked('Generation, training or captioning still needs this server. Finish or clear its queue before applying plugin changes.')
+        raise RestartBlocked(f'Generation, training or captioning still needs this server. Finish or clear its queue before {action}.')
     # No SQLite read snapshot is needed across the bounded external queue read.
     db.session.rollback()
+
+
+def freeze_when_idle(action, app=None):
+    """Close admissions and prove LDS is idle, exactly as plugin Apply does.
+
+    Returns the frozen gate, whose locks belong to the CALLING thread: that
+    thread releases it when nothing changed, or keeps it (and stays alive)
+    until the process exits. Raises RestartBlocked with a user-facing reason.
+    """
+    app = app or current_app._get_current_object()
+    registry = app.extensions.get('lds_plugins')
+    gate = app.extensions.get(_EXTENSION)
+    if registry is None or gate is None:
+        raise RestartBlocked('Restart safety is unavailable. Restart LDS, then try again.')
+    gate.freeze()
+    try:
+        with app.app_context():
+            _lock_and_check_work(gate, registry, (), action)
+    except BaseException:
+        gate.release()
+        raise
+    return gate
 
 
 def _connection_refused(error):

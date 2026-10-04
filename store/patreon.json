@@ -1,0 +1,11 @@
+{
+  "format": "lds-patreon/1",
+  "service_url": "https://store.example.invalid",
+  "checkout_origin": "https://www.patreon.com",
+  "join_url": "https://www.patreon.com/c/Loraperfectgf",
+  "catalog": {
+    "root": null,
+    "first_party_ids": [],
+    "plugin_ids": []
+  }
+}

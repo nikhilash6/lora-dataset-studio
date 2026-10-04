@@ -73,8 +73,14 @@ class StoreConfig:
     external_ids: frozenset = frozenset()
     scoped_ids: frozenset = frozenset()
     additional_catalog_targets: tuple = ()
+    # Set only by the shipped Patreon configuration (store/patreon.py). It
+    # selects the grant service for this source's paid releases; a catalog
+    # cannot claim it for itself.
+    provider: str = ''
 
     def __post_init__(self):
+        if self.provider not in ('', 'patreon'):
+            raise StoreError('The store trust configuration cannot be verified.')
         object.__setattr__(self, 'metadata_url', _base_url(self.metadata_url))
         object.__setattr__(self, 'target_url', _base_url(self.target_url))
         if (not isinstance(self.root, bytes) or not 0 < len(self.root) <= 512000
@@ -183,13 +189,37 @@ def load_private_configs():
         raise StoreError('The private plugin sources configuration cannot be verified.') from exc
 
 
+def patreon_source(private_sources):
+    """The shipped Patreon catalog, minus identifiers an operator source claims.
+
+    ``sources.json`` is an explicit local operator decision, so it keeps the
+    identifiers it lists; the Patreon catalog serves the remaining ones. None
+    when Patreon is not configured or has nothing left to serve."""
+    from .patreon import patreon_plugin_source
+    claimed = frozenset(pid for source in private_sources for pid in source.selected_ids)
+    try:
+        return patreon_plugin_source(claimed)
+    except StoreNotConfigured:
+        return None
+
+
+def load_additional_configs():
+    """Operator sources first, then Patreon; an invalid Patreon file never hides them."""
+    sources = load_private_configs()
+    try:
+        patreon = patreon_source(sources)
+    except StoreError:
+        patreon = None
+    return sources + ([patreon] if patreon else [])
+
+
 def config_for_plugins(plugin_ids):
     """None preserves the default Store session and its existing trust root."""
     requested = [plugin_ids] if isinstance(plugin_ids, str) else plugin_ids
     if (not isinstance(requested, (list, tuple)) or not 1 <= len(requested) <= 50
             or any(not isinstance(pid, str) for pid in requested)):
         raise StoreError('Select valid plugin identifiers.')
-    sources = load_private_configs()
+    sources = load_additional_configs()
     selected = {next((index for index, source in enumerate(sources) if pid in source.selected_ids), -1)
                 for pid in requested}
     if len(selected) > 1:

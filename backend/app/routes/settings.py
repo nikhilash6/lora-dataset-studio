@@ -776,6 +776,33 @@ def update_apply():
     return jsonify(updater.start_zip_update())
 
 
+@bp.get('/update/patreon')
+def update_patreon_status():
+    """The Patreon core channel: latest signed release, membership, and whether
+    this install shape can apply it. Uses the installation's Patreon link, so
+    it needs the same administration as the Store purchase routes."""
+    from ..plugins.admin import require_admin
+    from ..services import patreon_core
+    if (denied := require_admin()) is not None:
+        return denied
+    response = jsonify(patreon_core.status(force=bool(request.args.get('force'))))
+    response.headers['Cache-Control'] = 'no-store'
+    return response
+
+
+@bp.post('/update/patreon/apply')
+def update_patreon_apply():
+    """Install the latest Patreon core release (git/Pinokio fast-forward, or the
+    async staged ZIP swap polled through /api/update/progress)."""
+    from ..plugins.admin import require_admin
+    from ..services import patreon_core
+    if (denied := require_admin()) is not None:
+        return denied
+    _update_cache.update(ts=0.0, data=None)
+    _git_check_cache.update(ts=0.0, data=None)
+    return patreon_core.apply_response()
+
+
 @bp.get('/update/progress')
 def update_progress():
     """Live progress of an in-flight release-ZIP update (packaged install). The

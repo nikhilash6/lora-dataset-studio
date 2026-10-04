@@ -24,7 +24,9 @@ from ..storage import managed_path, _write_bytes
 from .client import StoreError, StoreNotConfigured
 
 MAX_RESPONSE = 256 * 1024
+MAX_ERROR_RESPONSE = 4096
 _SECRET = re.compile(r'[A-Za-z0-9_-]{43}\Z')
+_ERROR_CODE = re.compile(r'[a-z][a-z0-9_]{0,63}\Z')
 _ID = re.compile(r'[a-z][a-z0-9_]{1,63}\Z')
 _HASH = re.compile(r'[0-9a-f]{64}\Z')
 
@@ -57,6 +59,29 @@ def load_commerce_config():
         return {'service_url': _origin(value['service_url']), 'checkout_origin': _origin(value['checkout_origin'])}
     except (OSError, ValueError, KeyError, TypeError) as exc:
         raise StoreError('The commerce connection configuration is invalid.') from exc
+
+
+class ServiceRefused(StoreError):
+    """The service answered with an error. ``code`` is its fixed ``{error}``
+    code when the small JSON body could be read, otherwise None."""
+
+    def __init__(self, message, status, code=None):
+        super().__init__(message)
+        self.status = status
+        self.code = code
+
+
+def _error_code(response):
+    try:
+        raw = bytearray()
+        for chunk in response.iter_content(chunk_size=MAX_ERROR_RESPONSE):
+            raw.extend(chunk)
+            if len(raw) > MAX_ERROR_RESPONSE:
+                return None
+        code = json.loads(raw).get('error')
+        return code if isinstance(code, str) and _ERROR_CODE.fullmatch(code) else None
+    except (requests.RequestException, ValueError, TypeError, AttributeError, RecursionError):
+        return None
 
 
 def _dpapi(value, *, decrypt=False):
@@ -104,8 +129,10 @@ class CommerceClient:
             response = session.request(method, self.origin + path, json=data, headers=headers,
                                        timeout=network_timeout((10, 30)), stream=True, allow_redirects=False)
             if response.status_code not in {200, 201}:
+                code = _error_code(response)
                 response.close()
-                raise StoreError('The commerce service refused the request or is unavailable. Installed plugins continue to work.')
+                raise ServiceRefused('The commerce service refused the request or is unavailable. Installed plugins '
+                                     'continue to work.', response.status_code, code)
             return session, response
         except requests.RequestException:
             session.close()
@@ -225,18 +252,26 @@ class CommerceClient:
 
     def download(self, release, target_info, destination):
         """Grant never replaces TUF metadata: caller supplies authenticated length/hash."""
-        target = release.target
+        return self.download_target(release.manifest.id, release.manifest.version, release.target,
+                                    target_info, destination)
+
+    def download_target(self, product_id, version, target, target_info, destination, *,
+                        maximum=MAX_TOTAL_BYTES, on_progress=None):
+        """Download one granted artifact whose length and SHA-256 come from TUF.
+
+        ``product_id`` is a plugin identifier or ``lds_core``. The grant and the
+        server response can never widen the authenticated length or hash."""
         digest = target_info.hashes.get('sha256')
         if (not isinstance(target, str) or _entry_relpath(target) != target
                 or any(c in target for c in ('%', '?', '#', '\\'))
                 or not isinstance(digest, str) or not _HASH.fullmatch(digest)
-                or type(target_info.length) is not int or not 0 < target_info.length <= MAX_TOTAL_BYTES
+                or type(target_info.length) is not int or not 0 < target_info.length <= maximum
                 or getattr(target_info, 'path', target) != target):
             raise StoreError('This release has no valid authenticated artifact identity.')
         credential = self.credential()
         if credential is None:
             raise StoreError('Connect this installation and acquire the plugin before downloading it.')
-        body = {'plugin_id': release.manifest.id, 'version': release.manifest.version, 'target': target, 'sha256': digest}
+        body = {'plugin_id': product_id, 'version': version, 'target': target, 'sha256': digest}
         value = self._json('POST', '/v1/grants', data=body, credential=credential)
         path = '/v1/artifacts/' + quote(target, safe='/')
         if (value.get('download_url') != self.origin + path or value.get('target') != target
@@ -258,6 +293,8 @@ class CommerceClient:
                             raise StoreError('The downloaded artifact exceeds its authenticated length.')
                         stream.write(chunk)
                         hasher.update(chunk)
+                        if on_progress:
+                            on_progress(size, target_info.length)
                     if size != target_info.length or hasher.hexdigest() != digest:
                         raise StoreError('The downloaded artifact failed its authenticated hash or length check.')
                     stream.flush()
@@ -290,7 +327,11 @@ def _plugin(value):
         raise StoreError('Select a valid plugin.')
 
 
-def download_release(release, target_info, destination):
+def download_release(release, target_info, destination, *, provider=''):
+    """The SOURCE catalog selects the grant service, never a price label alone."""
+    if provider == 'patreon':
+        from .patreon import PatreonClient
+        return PatreonClient().download(release, target_info, destination)
     return CommerceClient().download(release, target_info, destination)
 
 
