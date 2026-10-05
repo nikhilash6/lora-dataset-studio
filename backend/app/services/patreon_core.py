@@ -188,7 +188,7 @@ def status(root=None, *, force=False):
     """What the Updates card shows for the Patreon channel. Never raises."""
     now = time.time()
     if not force and _status_cache['data'] is not None and now - _status_cache['ts'] < STATUS_TTL_SECONDS:
-        return _status_cache['data']
+        return _with_access(dict(_status_cache['data']))
     root = Path(root or REPO_ROOT)
     from ..version import APP_VERSION
     mode = install_mode(root)
@@ -201,14 +201,6 @@ def status(root=None, *, force=False):
             marker = updater.patreon_marker(root)
             result['on_channel'] = bool(marker and updater._is_ancestor(root, marker, 'HEAD'))
         channel = read_channel()
-        try:
-            access = access_summary()
-        except StoreNotConfigured:
-            access = {'status': 'not_configured', 'patreon': None}
-        except (StoreError, OSError):
-            access = {'status': 'unavailable', 'patreon': None}
-        result['access'] = access
-        result['entitled'] = bool(access['patreon'] and access['patreon']['status'] == 'active')
         if channel is not None:
             release = channel.release
             result['release'] = release.payload()
@@ -221,14 +213,30 @@ def status(root=None, *, force=False):
                 result['update_available'] = release.version > APP_VERSION
             if mode == 'docker' and result['update_available']:
                 result['blocked_reason'] = DOCKER_LIMIT
-        result['can_apply'] = bool(result['update_available'] and result['entitled']
-                                   and not result['blocked_reason'] and not _installed)
+        _with_access(result)
     except StoreNotConfigured as exc:
         result.update(status='not_configured', message=str(exc))
     except (StoreError, OSError, ValueError) as exc:
         result.update(status='unavailable', message=str(exc) if isinstance(exc, StoreError)
                       else 'The Patreon update channel could not be checked.')
     _status_cache.update(ts=now, data=result)
+    return result
+
+
+def _with_access(result):
+    """Membership changes on Patreon, outside LDS (connecting, renewal, cancelling):
+    only the signed channel and Git checks are cached, never the membership."""
+    try:
+        access = access_summary()
+    except StoreNotConfigured:
+        access = {'status': 'not_configured', 'patreon': None}
+    except (StoreError, OSError):
+        access = {'status': 'unavailable', 'patreon': None}
+    result['access'] = access
+    result['entitled'] = bool(access['patreon'] and access['patreon']['status'] == 'active')
+    result['restart_required'] = bool(_installed)
+    result['can_apply'] = bool(result['update_available'] and result['entitled']
+                               and not result['blocked_reason'] and not _installed)
     return result
 
 

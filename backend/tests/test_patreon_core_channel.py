@@ -489,6 +489,20 @@ def test_status_reports_the_channel_without_applying(repos, service, client, mon
     assert client.get('/api/update/patreon', environ_base={'REMOTE_ADDR': '198.51.100.8'}).status_code == 403
 
 
+def test_cached_status_still_reads_a_new_membership(repos, service, client, monkeypatch):
+    # Connecting happens on Patreon, outside LDS: the Updates card must offer the
+    # update right away, not keep the cached "not connected" answer for ten minutes.
+    monkeypatch.setattr(patreon_core, 'REPO_ROOT', repos.user)
+    publish_release(service, repos)
+    first = client.get('/api/update/patreon?force=1').json
+    assert first['access']['status'] == 'not_connected' and first['can_apply'] is False
+    enrolled()
+    service.membership = ACTIVE
+    cached = client.get('/api/update/patreon').json
+    assert cached['release']['version'] == VERSION
+    assert cached['entitled'] is True and cached['can_apply'] is True
+
+
 def test_docker_never_applies_inside_the_container(repos, service, client, monkeypatch):
     monkeypatch.setenv('LDS_RUNTIME', 'docker-gpu')
     publish_release(service, repos)
