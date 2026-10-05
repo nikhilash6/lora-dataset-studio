@@ -1443,7 +1443,8 @@ def test_patreon_channel_fetches_in_a_disposable_container_then_applies(tmp_path
     assert run == [
         "run", "--rm", "--pull", "never", "--no-healthcheck", "--user", "0:0",
         "--entrypoint", "/usr/local/bin/python" if studio else "/app/.venv/bin/python",
-        "--workdir", "/app/backend", "--volume", volumes[0], "--volume", volumes[1], *dns,
+        "--workdir", "/app/backend", "--env", "PYTHONPATH=", "--env", "PYTHONHOME=",
+        "--volume", volumes[0], "--volume", volumes[1], *dns,
         "sha256:" + hashlib.sha256(image.encode()).hexdigest(),
         "-m", "app.services.patreon_core", "fetch-source",
         "--out", "/out", "--data", "/data", "--newer-than", INSTALLED]

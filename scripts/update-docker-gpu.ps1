@@ -1659,10 +1659,12 @@ function Invoke-PatreonFetch([string]$Root, [string]$OutDir, [string]$InstalledV
     $image = Resolve-StackImageId -Docker $docker -Stack $stack
     # The current image, never the running container: ComfyUI, plugins and the
     # app do not start. Exactly two mounts: the data folder read-only (for the
-    # installation's Patreon connection) and the fresh output folder.
+    # installation's Patreon connection) and the fresh output folder. The
+    # Python variables are emptied as studio_launch.sh does for the app.
     $arguments = @(
         'run', '--rm', '--pull', 'never', '--no-healthcheck', '--user', '0:0',
         '--entrypoint', $stack.Python, '--workdir', '/app/backend',
+        '--env', 'PYTHONPATH=', '--env', 'PYTHONHOME=',
         '--volume', ($dataItem.FullName + ':/data:ro'),
         '--volume', ((Get-FullPath $OutDir) + ':/out:rw'))
     $dns = Get-StackDns -Root $Root -Stack $stack
