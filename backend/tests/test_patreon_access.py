@@ -250,6 +250,18 @@ def test_library_reads_items_and_membership(remote):
         client.library()
 
 
+def test_library_accepts_external_plugin_identifiers(remote):
+    # Patreon sells external plugins too; their identifiers are publisher.name.
+    client = connected(remote)
+    external = {'plugin_id': 'studio.member_tool', 'status': 'active', 'acquisition': 'all_published',
+                'updates': 'while_active', 'offline': 'installed_continues', 'valid_until': None}
+    remote[0].append(Response({'items': [external], 'patreon': PRO}))
+    assert client.library()['items'] == [external]
+    remote[0].append(Response({'items': [{**external, 'plugin_id': 'studio.member.tool'}], 'patreon': PRO}))
+    with pytest.raises(StoreError):
+        client.library()
+
+
 # --- Routes ---------------------------------------------------------------------------
 
 def test_routes_require_admin_and_csrf_and_never_return_credentials(remote):

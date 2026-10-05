@@ -20,6 +20,7 @@ import requests
 from ... import config as cfg
 from ..admin import is_admin, require_admin
 from ..install import MAX_TOTAL_BYTES, _entry_relpath
+from ..manifest import EXTERNAL_ID
 from ..storage import managed_path, _write_bytes
 from .client import StoreError, StoreNotConfigured
 
@@ -214,7 +215,9 @@ class CommerceClient:
 
     @staticmethod
     def _item(item):
-        if (not isinstance(item, dict) or not _ID.fullmatch(str(item.get('plugin_id', '')))
+        # Patreon also sells external plugins, whose identifiers are publisher.name.
+        plugin_id = str(item.get('plugin_id', '')) if isinstance(item, dict) else ''
+        if (not isinstance(item, dict) or not (_ID.fullmatch(plugin_id) or EXTERNAL_ID.fullmatch(plugin_id))
                 or item.get('status') not in {'active', 'revoked', 'verification_required'}
                 or item.get('acquisition') not in {'all_published', 'through_purchase_date', None}
                 or item.get('updates') not in {'included', 'none', 'while_active', None}
