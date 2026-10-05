@@ -10,8 +10,10 @@ bytes come through a membership-checked download grant (product ``lds_core``).
   like ``git pull --ff-only``. Pinokio restarts the app from its own launcher.
 * ZIP install: the verified archive goes through the existing staged swap with
   its backup and rollback (``updater.apply_zip_update``).
-* Docker: never applied from inside the container; see
-  docs/plugins/patreon-access.md for the host-side limit.
+* Docker: never applied from inside the container. The host updater
+  (``update-docker.bat patreon``) runs ``fetch-source`` below in a disposable
+  container of the current image, checks the result, then applies the release
+  source archive with its own transaction and image rebuild.
 
 Nothing is applied while LDS has work running: the idle gate of plugin Apply
 (plugins/restart.py) is frozen before the first file changes and held until
@@ -19,11 +21,17 @@ the process exits.
 """
 from __future__ import annotations
 
+import argparse
 import json
+import os
 import re
+import stat
 import subprocess
+import sys
+import tempfile
 import threading
 import time
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -53,11 +61,25 @@ IDLE_ACTION = 'installing the LDS update'
 _VERSION = re.compile(r'\d{4}\.\d{2}\.\d{2}(?:\.\d+)?\Z')
 _SHA = re.compile(r'[0-9a-f]{40}\Z')
 
-DOCKER_LIMIT = ('Patreon updates cannot be installed in a Docker container yet: the container cannot '
-                'replace its own image, and the host update script does not apply Patreon releases '
-                'yet. Your installed version keeps working.')
+DOCKER_LIMIT = ('This Patreon release has no Docker package: a container cannot replace its own image, '
+                'and the host update script needs the release source archive. Your installed version '
+                'keeps working.')
+DOCKER_HOST_COMMAND = 'update-docker.bat patreon'
+DOCKER_HOST_UPDATE = ('LDS cannot update itself inside Docker. On the computer that runs Docker, run '
+                      f'{DOCKER_HOST_COMMAND} in the LDS folder.')
+PATREON_REQUIRED = 'This update is available to Patreon members. Connect Patreon or join, then check again.'
 PINOKIO_HOLD = ('An LDS update was installed. Stop the app in Pinokio, click Update, then Start it '
                 'to finish.')
+
+# fetch-source output, read by scripts/update-docker-gpu.ps1: the manifest is
+# written last, so its presence means the archive beside it is complete.
+SOURCE_FORMAT = 'lds-core-source/1'
+SOURCE_ARCHIVE = 'lds-core-source.zip'
+SOURCE_MANIFEST = 'manifest.json'
+# Exit codes of `python -m app.services.patreon_core fetch-source` (argparse
+# usage errors exit with 2).
+EXIT_FETCHED, EXIT_FAILED, EXIT_CURRENT, EXIT_MEMBERSHIP = 0, 1, 3, 4
+_CREDENTIAL_MAX_BYTES = 16384
 
 
 class CoreChannelError(StoreError):
@@ -73,6 +95,8 @@ class CoreRelease:
     notes: tuple
     bundle: str
     archive: str
+    # Full source tree for the Docker host updater; absent from older releases.
+    source: str | None = None
 
     def payload(self):
         return {'version': self.version, 'published_at': self.published_at,
@@ -84,10 +108,14 @@ class Channel:
     release: CoreRelease
     bundle_info: object
     archive_info: object
+    source_info: object = None
 
 
 def parse_core_releases(value):
-    """Strict ``lds-core-releases/1``; newest first. Never carries lengths or hashes."""
+    """Strict ``lds-core-releases/1``; newest first. Never carries lengths or hashes.
+
+    ``source`` is optional; when present it must name the release's own
+    ``core/lds-core-<version>.source.zip``."""
     try:
         if not isinstance(value, dict) or value.get('format') != CORE_RELEASES_FORMAT:
             raise ValueError
@@ -112,11 +140,12 @@ def parse_core_releases(value):
                     or any(not isinstance(note, str) or len(note) > 1000 for note in notes)):
                 raise ValueError
             if (item.get('bundle') != f'core/lds-core-{version}.bundle'
-                    or item.get('archive') != f'core/lds-core-{version}.zip'):
+                    or item.get('archive') != f'core/lds-core-{version}.zip'
+                    or ('source' in item and item['source'] != f'core/lds-core-{version}.source.zip')):
                 raise ValueError
             versions.add(version)
             result.append(CoreRelease(version, commit, base, published, tuple(notes),
-                                      item['bundle'], item['archive']))
+                                      item['bundle'], item['archive'], item.get('source')))
     except (ValueError, TypeError, AttributeError, OverflowError):
         raise StoreError('The Patreon core release list is invalid.') from None
     return sorted(result, key=lambda release: release.version, reverse=True)
@@ -134,8 +163,9 @@ def read_channel():
         if not releases:
             return None
         latest = releases[0]
+        source = session.target_info(latest.source, maximum=CORE_MAX_BYTES) if latest.source else None
         return Channel(latest, session.target_info(latest.bundle, maximum=CORE_MAX_BYTES),
-                       session.target_info(latest.archive, maximum=CORE_MAX_BYTES))
+                       session.target_info(latest.archive, maximum=CORE_MAX_BYTES), source)
 
 
 def install_mode(root=None):
@@ -195,7 +225,7 @@ def status(root=None, *, force=False):
     result = {'status': 'ready', 'message': '', 'install_mode': mode, 'current': APP_VERSION,
               'current_sha': updater.current_sha(root), 'on_channel': False, 'release': None,
               'update_available': False, 'access': None, 'entitled': False, 'can_apply': False,
-              'blocked_reason': None, 'restart_required': bool(_installed)}
+              'blocked_reason': None, 'host_command': None, 'restart_required': bool(_installed)}
     try:
         if mode in ('git', 'pinokio'):
             marker = updater.patreon_marker(root)
@@ -212,7 +242,12 @@ def status(root=None, *, force=False):
             else:
                 result['update_available'] = release.version > APP_VERSION
             if mode == 'docker' and result['update_available']:
-                result['blocked_reason'] = DOCKER_LIMIT
+                # The container never replaces its own image; the host updater
+                # applies the release source archive (fetch_source below).
+                if release.source:
+                    result['host_command'] = DOCKER_HOST_COMMAND
+                else:
+                    result['blocked_reason'] = DOCKER_LIMIT
         _with_access(result)
     except StoreNotConfigured as exc:
         result.update(status='not_configured', message=str(exc))
@@ -235,8 +270,8 @@ def _with_access(result):
     result['access'] = access
     result['entitled'] = bool(access['patreon'] and access['patreon']['status'] == 'active')
     result['restart_required'] = bool(_installed)
-    result['can_apply'] = bool(result['update_available'] and result['entitled']
-                               and not result['blocked_reason'] and not _installed)
+    result['can_apply'] = bool(result['update_available'] and result['entitled'] and not result['blocked_reason']
+                               and result['install_mode'] != 'docker' and not _installed)
     return result
 
 
@@ -376,7 +411,7 @@ def apply_response(root=None):
             return refuse('An LDS update is already installed. Restart LDS to finish it.')
         mode = install_mode(root)
         if mode == 'docker':
-            return refuse(DOCKER_LIMIT, 'docker_limit')
+            return refuse(DOCKER_HOST_UPDATE, 'docker_limit')
         channel = read_channel()
         if channel is None:
             return jsonify(ok=True, changed=False, reason='No Patreon release is published yet.')
@@ -385,8 +420,7 @@ def apply_response(root=None):
         if membership == 'verification_required':
             return refuse(VERIFICATION_UNAVAILABLE, 'verification_required')
         if membership != 'active':
-            return refuse('This update is available to Patreon members. Connect Patreon or join, '
-                          'then check again.', 'patreon_required')
+            return refuse(PATREON_REQUIRED, 'patreon_required')
         if mode == 'zip':
             result = apply_zip(root, channel)
             if not result.get('ok'):
@@ -430,3 +464,124 @@ def apply_response(root=None):
                       else 'The Patreon update could not be prepared. Your files were not changed.')
     finally:
         _apply_lock.release()
+
+
+# --- Docker: the host updater's disposable fetch -----------------------------
+
+@contextmanager
+def _private_data_dir():
+    """A writable data folder for one fetch; the installation's own stays as it is."""
+    previous = os.environ.get('LDS_DATA_DIR')
+    with tempfile.TemporaryDirectory(prefix='lds-patreon-fetch-', ignore_cleanup_errors=True) as work:
+        folder = Path(work).resolve()
+        os.environ['LDS_DATA_DIR'] = str(folder)
+        try:
+            yield folder
+        finally:
+            if previous is None:
+                os.environ.pop('LDS_DATA_DIR', None)
+            else:
+                os.environ['LDS_DATA_DIR'] = previous
+
+
+def _copy_credential(data, work):
+    """Copy only the installation credential out of the read-only data folder.
+
+    Reading it in place would create a lock file and adjust permissions beside
+    it, which a read-only mount refuses. No credential means not connected,
+    which the membership check reports."""
+    folder = PatreonClient().folder
+    source = Path(data).joinpath(folder.relative_to(work), 'installation.json')
+    try:
+        descriptor = os.open(source, os.O_RDONLY | getattr(os, 'O_NOFOLLOW', 0) | getattr(os, 'O_BINARY', 0))
+    except FileNotFoundError:
+        return
+    with os.fdopen(descriptor, 'rb') as stream:
+        info = os.fstat(stream.fileno())
+        if not stat.S_ISREG(info.st_mode) or info.st_size > _CREDENTIAL_MAX_BYTES:
+            raise CoreChannelError('The saved Patreon connection could not be read. Nothing was changed.')
+        value = stream.read(_CREDENTIAL_MAX_BYTES + 1)
+    folder.mkdir(parents=True, exist_ok=True)
+    copy = os.open(folder / 'installation.json',
+                   os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, 'O_BINARY', 0), 0o600)
+    with os.fdopen(copy, 'wb') as stream:
+        stream.write(value)
+
+
+def _write_file(path, data):
+    """Complete file or none: temporary file, fsync, rename in the same folder."""
+    descriptor, temporary = tempfile.mkstemp(prefix='.manifest-', dir=path.parent)
+    try:
+        with os.fdopen(descriptor, 'wb') as stream:
+            stream.write(data)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, path)
+    finally:
+        Path(temporary).unlink(missing_ok=True)
+
+
+def fetch_source(out, data, *, newer_than=None):
+    """Write the latest release's verified source archive, then its manifest.
+
+    Run by the Docker host updater (scripts/update-docker-gpu.ps1, channel
+    ``patreon``) in a disposable container of the current image: ``data`` is
+    the installation's data folder, mounted read-only, and ``out`` an empty
+    host folder, the only writable mount. TUF starts from the root shipped in
+    the image; the grant and the length/SHA-256 checks are those of every core
+    download. Returns ``{'status': 'current', 'version': latest or None}``
+    when nothing newer than ``newer_than`` is published, else the manifest."""
+    out = Path(out)
+    if out.is_symlink() or not out.is_dir() or any(out.iterdir()):
+        raise CoreChannelError('The output folder must be an existing, empty folder.')
+    if newer_than is not None and not _VERSION.fullmatch(newer_than):
+        raise CoreChannelError('The installed version is not a valid LDS version.')
+    with _private_data_dir() as work:
+        _copy_credential(data, work)
+        channel = read_channel()
+        if channel is None or (newer_than is not None and not channel.release.version > newer_than):
+            return {'status': 'current', 'version': channel.release.version if channel else None}
+        release, info = channel.release, channel.source_info
+        if info is None:
+            raise CoreChannelError(DOCKER_LIMIT)
+        membership = (access_summary()['patreon'] or {}).get('status')
+        if membership == 'verification_required':
+            raise VerificationUnavailable(VERIFICATION_UNAVAILABLE)
+        if membership != 'active':
+            raise MembershipRequired(PATREON_REQUIRED)
+        _download(release, release.source, info, destination=out / SOURCE_ARCHIVE)
+    manifest = {'format': SOURCE_FORMAT, 'version': release.version, 'commit': release.commit,
+                'archive': SOURCE_ARCHIVE, 'length': info.length, 'sha256': info.hashes['sha256']}
+    _write_file(out / SOURCE_MANIFEST, json.dumps(manifest, indent=2).encode('utf-8') + b'\n')
+    return manifest
+
+
+def main(argv=None):
+    parser = argparse.ArgumentParser(prog='python -m app.services.patreon_core',
+                                     description='Patreon core channel commands for the Docker host updater.')
+    commands = parser.add_subparsers(dest='command', required=True)
+    fetch = commands.add_parser('fetch-source', help='download the verified source archive of the latest release')
+    fetch.add_argument('--out', required=True, help='empty folder that receives the archive and manifest.json')
+    fetch.add_argument('--data', required=True, help="the installation's data folder, only read")
+    fetch.add_argument('--newer-than', help='installed version: a release that is not newer downloads nothing')
+    args = parser.parse_args(argv)
+    try:
+        result = fetch_source(args.out, args.data, newer_than=args.newer_than)
+    except (MembershipRequired, VerificationUnavailable) as exc:
+        print(f'[ERROR] {exc}', file=sys.stderr)
+        return EXIT_MEMBERSHIP
+    except (StoreError, OSError, ValueError) as exc:
+        reason = str(exc) if isinstance(exc, StoreError) else 'The Patreon release could not be fetched.'
+        print(f'[ERROR] {reason}', file=sys.stderr)
+        return EXIT_FAILED
+    if result.get('status') == 'current':
+        latest = f' (latest: v{result["version"]})' if result['version'] else ''
+        print(f'No newer LDS release on the Patreon channel{latest}.')
+        return EXIT_CURRENT
+    print(f'Fetched LDS v{result["version"]} ({result["commit"][:12]}), verified against the signed '
+          'Patreon catalog.')
+    return EXIT_FETCHED
+
+
+if __name__ == '__main__':
+    sys.exit(main())

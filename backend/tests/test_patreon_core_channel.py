@@ -15,6 +15,7 @@ import os
 import secrets
 import shutil
 import subprocess
+import sys
 import threading
 import time
 import zipfile
@@ -44,6 +45,7 @@ BEARER = 'Bearer ' + CLIENT_ID + '.' + SECRET
 VERSION = '2099.01.02'
 BUNDLE = f'core/lds-core-{VERSION}.bundle'
 ARCHIVE = f'core/lds-core-{VERSION}.zip'
+SOURCE = f'core/lds-core-{VERSION}.source.zip'
 ACTIVE = {'linked': True, 'status': 'active', 'tier': 'member', 'valid_until': None,
           'join_url': 'https://www.patreon.com/c/example', 'request_url': None}
 
@@ -503,16 +505,129 @@ def test_cached_status_still_reads_a_new_membership(repos, service, client, monk
     assert cached['entitled'] is True and cached['can_apply'] is True
 
 
-def test_docker_never_applies_inside_the_container(repos, service, client, monkeypatch):
+@pytest.mark.parametrize('packaged', [True, False])
+def test_docker_never_applies_inside_the_container(repos, service, client, monkeypatch, packaged):
+    """A release with a source archive is installed from the host; without one
+    the card keeps the Docker limit. The container itself never applies."""
     monkeypatch.setenv('LDS_RUNTIME', 'docker-gpu')
-    publish_release(service, repos)
+    if packaged:
+        service.publish([entry(repos.release, repos.base, source=SOURCE)],
+                        {BUNDLE: repos.bundle, ARCHIVE: b'unused', SOURCE: b'source tree'})
+    else:
+        publish_release(service, repos)
     enrolled()
     status = client.get('/api/update/patreon?force=1').json
     assert status['install_mode'] == 'docker' and status['can_apply'] is False
-    assert status['blocked_reason'] == patreon_core.DOCKER_LIMIT
+    if packaged:
+        assert status['host_command'] == 'update-docker.bat patreon' and status['blocked_reason'] is None
+    else:
+        assert status['host_command'] is None and status['blocked_reason'] == patreon_core.DOCKER_LIMIT
     response = client.post('/api/update/patreon/apply', json={})
     assert response.status_code == 409 and response.json['code'] == 'docker_limit'
+    assert 'update-docker.bat patreon' in response.json['reason']
     assert service.grants() == []
+
+
+@pytest.mark.parametrize('source,valid', [
+    (None, True), (SOURCE, True), ('core/lds-core-2099.01.01.source.zip', False),
+    (ARCHIVE, False), ('', False), ('null', False)])
+def test_release_source_field_is_read_strictly(source, valid):
+    item = entry('1' * 40, '2' * 40)
+    if source == 'null':
+        item['source'] = None  # Present but empty is not "absent".
+    elif source is not None:
+        item['source'] = source
+    document = {'format': 'lds-core-releases/1', 'releases': [item]}
+    if not valid:
+        with pytest.raises(patreon_core.StoreError, match='release list is invalid'):
+            patreon_core.parse_core_releases(document)
+        return
+    release, = patreon_core.parse_core_releases(document)
+    assert release.source == source
+
+
+# --- Docker host updater: the disposable fetch-source command ----------------
+
+def _source_release(service, repos, payload=b'PK source tree of the release'):
+    service.publish([entry(repos.release, repos.base, source=SOURCE)],
+                    {BUNDLE: repos.bundle, ARCHIVE: b'unused', SOURCE: payload})
+    return payload
+
+
+def _tree(folder):
+    return {p.relative_to(folder).as_posix(): p.read_bytes() for p in sorted(folder.rglob('*')) if p.is_file()}
+
+
+def test_fetch_source_writes_the_verified_archive_and_leaves_the_data_folder_alone(repos, service, tmp_path):
+    payload = _source_release(service, repos)
+    enrolled()
+    data, out = Path(os.environ['LDS_DATA_DIR']), tmp_path / 'out'
+    out.mkdir()
+    before = _tree(data)
+
+    manifest = patreon_core.fetch_source(out, data, newer_than='2026.01.01')
+
+    digest = hashlib.sha256(payload).hexdigest()
+    assert manifest == {'format': 'lds-core-source/1', 'version': VERSION, 'commit': repos.release,
+                        'archive': 'lds-core-source.zip', 'length': len(payload), 'sha256': digest}
+    assert sorted(p.name for p in out.iterdir()) == ['lds-core-source.zip', 'manifest.json']
+    assert (out / 'lds-core-source.zip').read_bytes() == payload
+    assert json.loads((out / 'manifest.json').read_text(encoding='utf-8')) == manifest
+    grant, = service.grants()
+    assert grant == {'plugin_id': 'lds_core', 'version': VERSION, 'target': SOURCE, 'sha256': digest}
+    # Read-only mount: no TUF cache, lock or permission change lands in the data folder.
+    assert _tree(data) == before
+    assert os.environ['LDS_DATA_DIR'] == str(data)
+
+
+@pytest.mark.parametrize('case', ['current', 'tampered', 'inactive', 'not_connected', 'no_source'])
+def test_fetch_source_writes_nothing_it_cannot_vouch_for(repos, service, tmp_path, case):
+    payload = b'PK source tree of the release'
+    if case == 'no_source':
+        publish_release(service, repos)
+    else:
+        _source_release(service, repos, payload)
+    if case == 'tampered':
+        service.served[SOURCE] = payload[:-1] + bytes([payload[-1] ^ 1])
+    if case == 'inactive':
+        service.membership = {**ACTIVE, 'status': 'inactive', 'tier': None}
+    if case != 'not_connected':
+        enrolled()
+    out = tmp_path / 'out'
+    out.mkdir()
+    data = Path(os.environ['LDS_DATA_DIR'])
+    if case == 'current':
+        assert patreon_core.fetch_source(out, data, newer_than=VERSION) == {'status': 'current', 'version': VERSION}
+    else:
+        expected = {'tampered': patreon_core.StoreError, 'inactive': patreon_core.MembershipRequired,
+                    'not_connected': patreon_core.MembershipRequired,
+                    'no_source': patreon_core.CoreChannelError}[case]
+        with pytest.raises(expected):
+            patreon_core.fetch_source(out, data, newer_than='2026.01.01')
+    assert list(out.iterdir()) == []
+    assert len(service.grants()) == (1 if case == 'tampered' else 0)
+
+
+def test_fetch_source_command_line_reports_through_its_exit_code(repos, service, tmp_path):
+    payload = _source_release(service, repos)
+    enrolled()
+    backend = Path(__file__).resolve().parents[1]
+
+    def run(out, *extra):
+        out.mkdir()
+        return subprocess.run([sys.executable, '-m', 'app.services.patreon_core', 'fetch-source', '--out', str(out),
+                               '--data', os.environ['LDS_DATA_DIR'], *extra], cwd=backend, env=dict(os.environ),
+                              capture_output=True, text=True, timeout=120)
+
+    fetched = run(tmp_path / 'fetched', '--newer-than', '2026.01.01')
+    assert fetched.returncode == 0, fetched.stdout + fetched.stderr
+    assert f'Fetched LDS v{VERSION}' in fetched.stdout
+    assert (tmp_path / 'fetched' / 'lds-core-source.zip').read_bytes() == payload
+    current = run(tmp_path / 'current', '--newer-than', VERSION)
+    assert current.returncode == 3 and not list((tmp_path / 'current').iterdir())
+    service.membership = {**ACTIVE, 'status': 'inactive', 'tier': None}
+    refused = run(tmp_path / 'refused', '--newer-than', '2026.01.01')
+    assert refused.returncode == 4 and 'Patreon members' in refused.stderr
 
 
 # --- ZIP install: verified archive through the existing staged swap ----------
