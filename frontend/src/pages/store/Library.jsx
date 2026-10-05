@@ -91,9 +91,12 @@ export default function Library({ catalog, refresh = 0, onChanges, onPlan, admin
   };
   const unavailable = !library || ['not_configured', 'unavailable'].includes(library.status);
   const canManage = library?.can_manage !== false;
+  // The license-key library exists only where an operator configured it. Without
+  // it, the card would say "not connected" right under an active Patreon membership.
+  const licenseLibrary = library && library.status !== 'not_configured';
   return <div className="space-y-4">
   <PatreonCard adminToken={adminToken} />
-  <section aria-label="Plugin purchase library" className="space-y-4 rounded-xl border border-border bg-surface p-5">
+  {licenseLibrary && <section aria-label="Plugin purchase library" className="space-y-4 rounded-xl border border-border bg-surface p-5">
     <div className="flex flex-wrap items-center justify-between gap-2">
       <h2 className="text-lg font-semibold">Your plugin library</h2>
       <button type="button" className={BTN + ' inline-flex items-center gap-2'} disabled={busy} onClick={() => load()}>
@@ -137,6 +140,6 @@ export default function Library({ catalog, refresh = 0, onChanges, onPlan, admin
       <a href={checkout.url} target="_blank" rel="noopener noreferrer" className={BTN + ' inline-block'}>Open secure checkout</a>
       <p className="text-xs text-content-muted">After payment, refresh your library to check acquisition. Opening checkout does not confirm a purchase.</p>
     </div>}
-  </section>
+  </section>}
   </div>;
 }

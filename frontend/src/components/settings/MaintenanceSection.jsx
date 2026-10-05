@@ -253,7 +253,8 @@ function UpdatesCard() {
             </p>
           ) : s.ok ? (
             <p className="text-emerald-400">
-              <span aria-hidden>✓</span> You’re up to date.{' '}
+              {/* A members-only release exists: "up to date" would read as "nothing newer". */}
+              <span aria-hidden>✓</span> {patreon?.update_available ? 'The free version is up to date.' : 'You’re up to date.'}{' '}
               {/* Name the COMMIT on a git checkout: the release number alone would
                   claim the last release while the tree may be well past it. */}
               <span className="text-content-subtle">{versionLabel(s)}</span>
