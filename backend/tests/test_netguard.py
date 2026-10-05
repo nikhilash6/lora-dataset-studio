@@ -20,6 +20,13 @@ def test_loopback_client_needs_no_token(client):
     assert r.status_code == 200
 
 
+def test_health_names_this_process_for_the_restart_reload(client):
+    # After an update the page reloads only when the boot id changes: the old
+    # process keeps answering "ok" for about a second before it exits.
+    first, again = client.get('/api/health').json, client.get('/api/health').json
+    assert first['ok'] is True and len(first['boot']) == 16 and again['boot'] == first['boot']
+
+
 def test_remote_client_allowed_by_default_no_token(client):
     """require_token defaults OFF -> a LAN client gets in with no token (the whole
     point of trusted-LAN mode: reach it from a phone without typing a token)."""

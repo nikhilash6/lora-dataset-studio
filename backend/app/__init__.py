@@ -833,9 +833,13 @@ def create_app(config_object=None):
         register_builtin()
         load_plugins(app, csrf)
 
+    # A fresh id per process: after an update the browser reloads only once it
+    # changes, since the old process keeps answering until it exits.
+    boot_id = os.urandom(8).hex()
+
     @app.get('/api/health')
     def health():
-        return {'ok': True}
+        return {'ok': True, 'boot': boot_id}
 
     @app.get('/api/csrf-token')
     def csrf_token():
