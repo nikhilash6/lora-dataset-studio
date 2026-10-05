@@ -56,6 +56,18 @@ export default function PatreonUpdates({ patreon, installed = null, error = '', 
         <Notes release={patreon.release} />
       </div>
     )
+  } else if (view.kind === 'host') {
+    // Docker: the container never replaces its own image; the host updater does.
+    body = (
+      <div className="space-y-2">
+        <p className="text-content"><span aria-hidden>⬆</span> {view.text}</p>
+        <p className="text-content-muted">Docker installs it from the host. In the LDS folder, run:</p>
+        <code className="block overflow-x-auto whitespace-nowrap rounded bg-app/70 px-2 py-1 text-xs text-content">
+          {view.command}
+        </code>
+        <Notes release={patreon.release} />
+      </div>
+    )
   } else if (view.kind === 'join') {
     body = (
       <div className="space-y-2">

@@ -131,6 +131,11 @@ test('the Patreon block offers an install only when the server can apply it', ()
   const docker = patreonUpdateView({ ...ready, can_apply: false, entitled: true, blocked_reason: 'Docker limit' })
   assert.deepEqual([docker.kind, docker.reason], ['blocked', 'Docker limit'])
   assert.equal(patreonUpdateView({ ...ready, can_apply: false, entitled: true }).kind, 'blocked')
+  // Docker with a release the host updater can install: the command, never a button.
+  const host = patreonUpdateView({ ...ready, can_apply: false, entitled: true, host_command: 'update-docker.bat patreon' })
+  assert.deepEqual([host.kind, host.command], ['host', 'update-docker.bat patreon'])
+  assert.equal(patreonUpdateView({ ...ready, can_apply: false, entitled: false,
+    host_command: 'update-docker.bat patreon' }).kind, 'join')
   assert.equal(patreonUpdateView({ ...ready, restart_required: true }).kind, 'restart')
   // A stale verification is a retry, not an invitation to join.
   const stale = patreonUpdateView({ ...ready, can_apply: false, entitled: false,

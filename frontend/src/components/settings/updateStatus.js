@@ -89,8 +89,9 @@ export function progressPercent(p) {
 }
 
 /* The Patreon channel block of the Updates card, from GET /api/update/patreon.
-   kind: hidden | unavailable | none | current | restart | install | join | blocked.
-   Never offers an install the server said it cannot apply (can_apply). */
+   kind: hidden | unavailable | none | current | restart | install | host | join | blocked.
+   Never offers an install the server said it cannot apply (can_apply). `host`:
+   Docker, where the host updater installs the release (host_command). */
 export function patreonUpdateView(p) {
   if (!p || p.status === 'not_configured') return { kind: 'hidden' }
   if (p.status !== 'ready') {
@@ -107,6 +108,9 @@ export function patreonUpdateView(p) {
   }
   if (p.blocked_reason) return { kind: 'blocked', text: `${version} is available to Patreon members.`, reason: p.blocked_reason }
   if (p.can_apply) return { kind: 'install', text: `${version} is available with your Patreon membership.` }
+  if (p.entitled && typeof p.host_command === 'string' && p.host_command) {
+    return { kind: 'host', text: `${version} is available with your Patreon membership.`, command: p.host_command }
+  }
   if (p.access?.patreon?.status === 'verification_required') {
     return { kind: 'blocked', text: `${version} is available to Patreon members.`,
       reason: 'Patreon could not verify your membership right now. Check again in a few minutes.' }
