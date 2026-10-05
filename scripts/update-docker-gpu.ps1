@@ -9,6 +9,14 @@
   for that exact commit. V2 follows the maintained branch; MAIN remains an alias
   for V2 for existing launchers. Neither needs a Release to exist.
 
+  PATREON installs the latest Patreon release. A disposable container of the
+  current image downloads it with the app's own client (signed catalog,
+  membership grant, length and SHA-256), with the data folder mounted read-only
+  and one fresh host folder as its only writable mount. Nothing the running
+  container can write is ever applied. The host checks the archive against the
+  manifest on its own copy, then uses the same transaction as the other channels.
+  No channel installs an older APP_VERSION than the installed one.
+
   Before changing the installation, the script rejects unsafe ZIP paths,
   symlinks/reparse points, ambiguous archive roots and bundles missing the
   Docker sentinels. A ZIP installation is switched at top-level code boundaries
@@ -24,7 +32,7 @@
 #>
 [CmdletBinding()]
 param(
-    [ValidateSet('stable', 'v2', 'main')]
+    [ValidateSet('stable', 'v2', 'main', 'patreon')]
     [string]$Channel = 'stable',
 
     [string]$InstallRoot = '',
@@ -46,6 +54,7 @@ param(
     [long]$TestMaxEntryBytes = 0,
     [long]$TestMaxExpandedBytes = 0,
     [long]$TestRequiredFreeBytes = 0,
+    [string]$DockerPath = '',
     [switch]$TestMode,
 
     # Internal: the public script relaunches an exact copy from a unique temp
@@ -90,6 +99,27 @@ $script:MaxArchiveBytes = 512MB
 $script:MaxEntryBytes = 512MB
 $script:MaxExpandedBytes = 2GB
 $script:DiskReserveBytes = 256MB
+$script:VersionPattern = '^\d{4}\.\d{2}\.\d{2}(\.\d+)?$'
+# The two launcher lanes (docker-compose.gpu.yml, docker-compose.yml with its
+# overlays): the image Compose builds, the data folder the launcher mounts, the
+# Python of that image, and the DNS default Compose gives the lane.
+$script:DockerStacks = @{
+    gpu = [pscustomobject]@{
+        Image = 'lora-dataset-studio-gpu'; Data = 'data-docker-gpu'
+        Python = '/app/.venv/bin/python'; DefaultDns = '1.1.1.1'
+    }
+    studio = [pscustomobject]@{
+        Image = 'lora-dataset-studio'; Data = 'data-docker'
+        Python = '/usr/local/bin/python'; DefaultDns = ''
+    }
+}
+# Output contract of `python -m app.services.patreon_core fetch-source`. Its
+# exit codes: 0 fetched, 3 nothing newer, 4 refused by Patreon, other failures.
+$script:PatreonManifestFormat = 'lds-core-source/1'
+$script:PatreonArchiveName = 'lds-core-source.zip'
+$script:PatreonManifestName = 'manifest.json'
+$script:UpToDateExitCode = 3
+$script:ExitCode = 0
 
 function Assert-TestModeConfiguration {
     $hasInjection = [bool](
@@ -97,7 +127,8 @@ function Assert-TestModeConfiguration {
         $LauncherPath -or $GitRemote -or $TestCommit -or $TestFault -or
         $TestSignalPath -or $TestHoldMilliseconds -or $TestMaxArchiveBytes -or
         $TestMaxEntryBytes -or $TestMaxExpandedBytes -or
-        $TestRequiredFreeBytes -or $Repository -cne $script:OfficialRepository)
+        $TestRequiredFreeBytes -or $DockerPath -or
+        $Repository -cne $script:OfficialRepository)
     if ($hasInjection -and -not $TestMode) {
         throw 'Injection parameters refused without explicit -TestMode.'
     }
@@ -1437,6 +1468,241 @@ function Invoke-ZipInstallUpdate(
     throw "New version rejected (code $code). Old code restored and old stack relaunched."
 }
 
+function Read-AppVersion([string]$Path) {
+    # APP_VERSION of an installed or staged tree; $null when absent or unreadable.
+    if (-not [IO.File]::Exists($Path)) { return $null }
+    $item = Get-Item -LiteralPath $Path -Force
+    if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0 -or
+            $item.Length -gt 65536) {
+        return $null
+    }
+    $text = [IO.File]::ReadAllText($item.FullName, [Text.Encoding]::UTF8)
+    $found = [regex]::Match($text, "(?m)^APP_VERSION = '([^']+)'")
+    if (-not $found.Success -or $found.Groups[1].Value -cnotmatch $script:VersionPattern) {
+        return $null
+    }
+    return $found.Groups[1].Value
+}
+
+function Assert-NoDowngrade([string]$StagedRoot, [string]$InstalledVersion) {
+    # Zero-padded YYYY.MM.DD[.N]: ordinal order is version order, as in the app.
+    # Equal versions stay allowed, so a damaged installation can be reapplied.
+    if (-not $InstalledVersion) { return }
+    $staged = Read-AppVersion (Join-Path $StagedRoot 'backend\app\version.py')
+    if ($staged -and [string]::CompareOrdinal($staged, $InstalledVersion) -lt 0) {
+        throw ("This archive contains LDS v$staged, older than the installed v$InstalledVersion. " +
+            'No file was changed. An installation updated from Patreon updates with: ' +
+            'update-docker.bat patreon')
+    }
+}
+
+function Get-DockerStack([string]$Root) {
+    # The lane of the launchers: no marker is the historical GPU lane.
+    $marker = Join-Path $Root '.docker-launch-settings'
+    if (Test-Path -LiteralPath $marker) {
+        return $script:DockerStacks[(Read-LauncherModeMarker $marker)]
+    }
+    return $script:DockerStacks['gpu']
+}
+
+function Get-DockerCommandPath {
+    if ($DockerPath) {
+        $test = Get-FullPath $DockerPath
+        if (-not [IO.File]::Exists($test)) { throw "Docker test command not found: $test" }
+        return $test
+    }
+    # Same search as scripts/docker-launch.ps1, which rebuilds right after.
+    if ($env:LDS_DOCKER_EXE) {
+        $configured = Get-FullPath $env:LDS_DOCKER_EXE
+        if ([IO.File]::Exists($configured)) { return $configured }
+    }
+    $candidates = @()
+    if ($env:LOCALAPPDATA) {
+        $candidates += @(
+            (Join-Path $env:LOCALAPPDATA 'Programs\DockerDesktop\resources\bin\docker.exe'),
+            (Join-Path $env:LOCALAPPDATA 'Programs\Docker\Docker\resources\bin\docker.exe'))
+    }
+    foreach ($programs in @($env:ProgramFiles, $env:ProgramW6432)) {
+        if ($programs) {
+            $candidates += (Join-Path $programs 'Docker\Docker\resources\bin\docker.exe')
+        }
+    }
+    foreach ($candidate in $candidates) {
+        if ([IO.File]::Exists($candidate)) { return $candidate }
+    }
+    $command = Get-Command docker.exe -CommandType Application -ErrorAction SilentlyContinue |
+        Select-Object -First 1
+    if ($command) { return $command.Source }
+    throw 'Docker was not found. Install or start Docker Desktop, then try again.'
+}
+
+function Get-StackDns([string]$Root, $Stack) {
+    # The value Compose gives this lane: ${LDS_DNS:-<default>} from the
+    # environment, then .env. Only an IP address is ever passed on.
+    if (-not $Stack.DefaultDns) { return '' }
+    $value = [string]$env:LDS_DNS
+    $envFile = Join-Path $Root '.env'
+    if (-not $value.Trim() -and [IO.File]::Exists($envFile) -and
+            (Get-Item -LiteralPath $envFile -Force).Length -le 1MB) {
+        foreach ($line in [IO.File]::ReadAllLines($envFile, [Text.Encoding]::UTF8)) {
+            if ($line -match '^\s*(?:export\s+)?LDS_DNS\s*=(.*)$') { $value = $matches[1] }
+        }
+    }
+    $value = $value.Trim()
+    if ($value -match '^"([^"]*)"' -or $value -match "^'([^']*)'") {
+        $value = $matches[1].Trim()
+    } else {
+        $value = ($value -split '\s+#', 2)[0].Trim()
+    }
+    if (-not $value) { return $Stack.DefaultDns }
+    $address = $null
+    if (-not [Net.IPAddress]::TryParse($value, [ref]$address)) {
+        throw "LDS_DNS must be an IP address (found '$value'). No file was changed."
+    }
+    return $value
+}
+
+function Invoke-NativeLogged([string]$FilePath, [string[]]$Arguments) {
+    # Streams the command's output; a native stderr line is never an error here.
+    $previous = $ErrorActionPreference
+    try {
+        $ErrorActionPreference = 'Continue'
+        & $FilePath @Arguments 2>&1 | ForEach-Object { Write-Host ([string]$_) }
+        return [int]$LASTEXITCODE
+    } finally {
+        $ErrorActionPreference = $previous
+    }
+}
+
+function Resolve-StackImageId([string]$Docker, $Stack) {
+    $previous = $ErrorActionPreference
+    try {
+        $ErrorActionPreference = 'Continue'
+        $lines = @(& $Docker 'image' 'inspect' '--format' '{{.Id}}' $Stack.Image 2>&1 |
+            ForEach-Object { [string]$_ })
+        $code = [int]$LASTEXITCODE
+    } finally {
+        $ErrorActionPreference = $previous
+    }
+    $ids = @($lines | Where-Object { $_ -cmatch '^sha256:[0-9a-f]{64}$' })
+    if ($code -ne 0 -or $ids.Count -ne 1) {
+        throw ("Docker could not find the image '$($Stack.Image)' of this installation. Check that " +
+            'Docker Desktop is running and that LDS was started once with its Docker launcher.')
+    }
+    return $ids[0]
+}
+
+function Read-PatreonFetchResult([string]$OutDir, [string]$InstalledVersion) {
+    $entries = @(Get-ChildItem -LiteralPath $OutDir -Force)
+    $names = @($entries | ForEach-Object { $_.Name } | Sort-Object)
+    if (($names -join '|') -cne
+            ($script:PatreonArchiveName + '|' + $script:PatreonManifestName)) {
+        throw ('The fetch container did not leave exactly one release archive and its manifest. ' +
+            'No file was changed. An LDS image older than Patreon support for Docker must ' +
+            'first be updated with update-docker.bat.')
+    }
+    foreach ($entry in $entries) {
+        if ($entry.PSIsContainer -or
+                ($entry.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0 -or
+                ($entry.Name -eq $script:PatreonManifestName -and $entry.Length -gt 65536)) {
+            throw "Fetched file refused (folder, reparse point or size): $($entry.Name)"
+        }
+    }
+    try {
+        $manifest = [IO.File]::ReadAllText(
+            (Join-Path $OutDir $script:PatreonManifestName), [Text.Encoding]::UTF8) |
+            ConvertFrom-Json
+    } catch {
+        throw 'The release manifest is not valid JSON. No file was changed.'
+    }
+    $fields = @{}
+    foreach ($property in @($manifest.PSObject.Properties)) {
+        $fields[$property.Name] = $property.Value
+    }
+    $expected = @('archive', 'commit', 'format', 'length', 'sha256', 'version')
+    $length = $fields['length']
+    if ((@($manifest.PSObject.Properties | ForEach-Object { $_.Name } | Sort-Object) -join '|') -cne
+                ($expected -join '|') -or
+            [string]$fields['format'] -cne $script:PatreonManifestFormat -or
+            [string]$fields['archive'] -cne $script:PatreonArchiveName -or
+            [string]$fields['version'] -cnotmatch $script:VersionPattern -or
+            [string]$fields['commit'] -cnotmatch '^[0-9a-f]{40}$' -or
+            [string]$fields['sha256'] -cnotmatch '^[0-9a-f]{64}$' -or
+            -not ($length -is [int] -or $length -is [long]) -or
+            $length -le 0 -or $length -gt $script:MaxArchiveBytes) {
+        throw 'The release manifest is invalid. No file was changed.'
+    }
+    $version = [string]$fields['version']
+    if ([string]::CompareOrdinal($version, $InstalledVersion) -le 0) {
+        throw "The fetched release v$version is not newer than the installed v$InstalledVersion. No file was changed."
+    }
+    $archive = Join-Path $OutDir $script:PatreonArchiveName
+    if ([long](Get-Item -LiteralPath $archive -Force).Length -ne [long]$length) {
+        throw 'The fetched archive does not have the length of its manifest. No file was changed.'
+    }
+    return [pscustomobject]@{
+        ArchivePath = $archive; Version = $version; Commit = [string]$fields['commit']
+        Sha256 = [string]$fields['sha256']; Length = [long]$length
+    }
+}
+
+function Invoke-PatreonFetch([string]$Root, [string]$OutDir, [string]$InstalledVersion) {
+    $stack = Get-DockerStack $Root
+    $data = Join-Path $Root $stack.Data
+    $dataItem = if ([IO.Directory]::Exists($data)) { Get-Item -LiteralPath $data -Force } else { $null }
+    if (-not $dataItem -or
+            ($dataItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+        throw ("The data folder '$($stack.Data)' is missing or is a link. Start LDS once with " +
+            'its Docker launcher and connect Patreon, then run this update again.')
+    }
+    $docker = Get-DockerCommandPath
+    $image = Resolve-StackImageId -Docker $docker -Stack $stack
+    # The current image, never the running container: ComfyUI, plugins and the
+    # app do not start. Exactly two mounts: the data folder read-only (for the
+    # installation's Patreon connection) and the fresh output folder.
+    $arguments = @(
+        'run', '--rm', '--pull', 'never', '--no-healthcheck', '--user', '0:0',
+        '--entrypoint', $stack.Python, '--workdir', '/app/backend',
+        '--volume', ($dataItem.FullName + ':/data:ro'),
+        '--volume', ((Get-FullPath $OutDir) + ':/out:rw'))
+    $dns = Get-StackDns -Root $Root -Stack $stack
+    if ($dns) { $arguments += @('--dns', $dns) }
+    $arguments += @(
+        $image, '-m', 'app.services.patreon_core', 'fetch-source',
+        '--out', '/out', '--data', '/data', '--newer-than', $InstalledVersion)
+    Write-Step "Fetching the Patreon release in a disposable container of $($stack.Image)"
+    $code = Invoke-NativeLogged -FilePath $docker -Arguments $arguments
+    if ($code -eq $script:UpToDateExitCode) { return $null }
+    if ($code -eq 4) {
+        throw 'Patreon did not allow this download (reason above). No file was changed.'
+    }
+    if ($code -ne 0) {
+        throw ("The disposable fetch container failed (code $code). No file was changed. Check " +
+            'that Docker Desktop is running. An LDS image older than Patreon support for ' +
+            'Docker must first be updated with update-docker.bat.')
+    }
+    return (Read-PatreonFetchResult -OutDir $OutDir -InstalledVersion $InstalledVersion)
+}
+
+function Assert-ArchiveDigest([string]$Path, [string]$Sha256, [long]$Length) {
+    $item = Get-Item -LiteralPath $Path -Force
+    $stream = [IO.File]::Open($Path, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::Read)
+    try {
+        $hasher = [Security.Cryptography.SHA256]::Create()
+        try {
+            $digest = $hasher.ComputeHash($stream)
+        } finally {
+            $hasher.Dispose()
+        }
+    } finally {
+        $stream.Dispose()
+    }
+    $actual = -join @($digest | ForEach-Object { $_.ToString('x2') })
+    if ([long]$item.Length -ne $Length -or $actual -cne $Sha256) {
+        throw 'The release archive does not match the SHA-256 and length of its manifest. No file was changed.'
+    }
+}
+
 function Invoke-DockerGpuUpdate {
     if (-not $InstallRoot) {
         $scriptParent = Split-Path -Parent $PSScriptRoot
@@ -1465,25 +1731,63 @@ function Invoke-DockerGpuUpdate {
 
         Write-Host "Channel: $Channel" -ForegroundColor Yellow
         if (Test-Path -LiteralPath (Join-Path $root '.git')) {
+            if ($Channel -eq 'patreon') {
+                throw ('Git checkout detected: no Git file was modified. ' +
+                    'The patreon channel updates ZIP installations only.')
+            }
             Invoke-GitCheckoutFailClosed -Root $root `
                 -SelectedLauncher $LauncherPath
             return
         }
 
-        # Windows PowerShell 5.1 can otherwise negotiate TLS 1.0 on older machines.
-        [Net.ServicePointManager]::SecurityProtocol =
-            [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
-        $source = Resolve-ArchiveSource -SelectedChannel $Channel `
-            -Repo $Repository -LocalArchive $ArchivePath `
-            -OverrideUri $ArchiveUri -MetadataPath $ReleaseMetadataPath
-        Write-Host "Selected immutable commit: $($source.Commit)" -ForegroundColor Yellow
-        Write-Warning ('The GitHub archive is bound to this commit via HTTPS, but ' +
-            'this updater does not verify any cryptographic signature of the project.')
-
+        $installedVersion = Read-AppVersion (Join-Path $root 'backend\app\version.py')
         $downloadTemp = New-DownloadTempDirectory
+        $fetched = $null
+        if ($Channel -eq 'patreon') {
+            if (-not $installedVersion) {
+                throw 'The installed LDS version (backend/app/version.py) could not be read. No file was changed.'
+            }
+            # A fresh folder below this run's private temp folder: no other
+            # container shares it, and it is never applied as such.
+            $outDir = Join-Path $downloadTemp 'patreon'
+            [void][IO.Directory]::CreateDirectory($outDir)
+            $fetched = Invoke-PatreonFetch -Root $root -OutDir $outDir `
+                -InstalledVersion $installedVersion
+            if (-not $fetched) {
+                Write-Host "[OK] LDS v$installedVersion is up to date on the Patreon channel. Nothing was changed." `
+                    -ForegroundColor Green
+                $script:ExitCode = $script:UpToDateExitCode
+                return
+            }
+            Write-Host "Patreon release: v$($fetched.Version) ($($fetched.Commit))" -ForegroundColor Yellow
+            $source = [pscustomobject]@{
+                Kind = 'file'; Value = $fetched.ArchivePath; Tag = $fetched.Version
+                Channel = $Channel; Commit = $fetched.Commit
+            }
+        } else {
+            # Windows PowerShell 5.1 can otherwise negotiate TLS 1.0 on older machines.
+            [Net.ServicePointManager]::SecurityProtocol =
+                [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
+            $source = Resolve-ArchiveSource -SelectedChannel $Channel `
+                -Repo $Repository -LocalArchive $ArchivePath `
+                -OverrideUri $ArchiveUri -MetadataPath $ReleaseMetadataPath
+            Write-Host "Selected immutable commit: $($source.Commit)" -ForegroundColor Yellow
+            Write-Warning ('The GitHub archive is bound to this commit via HTTPS, but ' +
+                'this updater does not verify any cryptographic signature of the project.')
+        }
+
         $zipPath = Join-Path $downloadTemp 'source.zip'
         Copy-OrDownloadArchive -Source $source -Destination $zipPath
+        if ($fetched) {
+            # Checked on the host's own copy, outside every container mount.
+            Assert-ArchiveDigest -Path $zipPath -Sha256 $fetched.Sha256 -Length $fetched.Length
+        }
         $stagedRoot = Expand-AndValidateArchive -ZipPath $zipPath -TempRoot $downloadTemp
+        if ($fetched -and
+                (Read-AppVersion (Join-Path $stagedRoot 'backend\app\version.py')) -cne $fetched.Version) {
+            throw 'The Patreon archive does not contain the release of its manifest. No file was changed.'
+        }
+        Assert-NoDowngrade -StagedRoot $stagedRoot -InstalledVersion $installedVersion
         $validatedItems = @(Get-CodeItems $stagedRoot)
         Assert-LiveDestinationsSafe -Root $root -Items $validatedItems
 
@@ -1576,6 +1880,9 @@ function Invoke-SelfBootstrap {
             if ($TestRequiredFreeBytes) {
                 $childArguments += @('-TestRequiredFreeBytes', $TestRequiredFreeBytes)
             }
+            if ($DockerPath) {
+                $childArguments += @('-DockerPath', (Get-FullPath $DockerPath))
+            }
         }
 
         # Consume the child success stream explicitly so the function returns
@@ -1611,7 +1918,8 @@ if (-not $RunningFromTemp) {
 try {
     Assert-RunningFromSafeTemp
     Invoke-DockerGpuUpdate
-    exit 0
+    # 0, or 3 when the Patreon channel has nothing newer (the BAT says so).
+    exit $script:ExitCode
 } catch {
     Write-Host ''
     Write-Host "[ERROR] $($_.Exception.Message)" -ForegroundColor Red

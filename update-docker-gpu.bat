@@ -4,13 +4,14 @@ setlocal EnableExtensions DisableDelayedExpansion
 rem Portable one-click updater for the Docker installation.
 rem Double-click (or no argument) follows the latest published GitHub Release.
 rem Pass "v2" to follow the maintained branch; "main" is a compatibility alias.
+rem Pass "patreon" to install the latest Patreon release (active membership).
 set "LDS_UPDATE_REQUEST=%~1"
 set "LDS_UPDATE_EXTRA=%~2"
 setlocal EnableDelayedExpansion
 if not "!LDS_UPDATE_EXTRA!"=="" (
     endlocal
     echo [ERROR] Too many arguments.
-    echo Usage : update-docker-gpu.bat [stable^|v2^|main]
+    echo Usage : update-docker-gpu.bat [stable^|v2^|main^|patreon]
     pause
     exit /b 2
 )
@@ -30,9 +31,13 @@ if /I "!LDS_UPDATE_REQUEST!"=="v2" (
     endlocal
     goto :channel_v2
 )
+if /I "!LDS_UPDATE_REQUEST!"=="patreon" (
+    endlocal
+    goto :channel_patreon
+)
 endlocal
 echo [ERROR] Unknown channel.
-echo Usage : update-docker-gpu.bat [stable^|v2^|main]
+echo Usage : update-docker-gpu.bat [stable^|v2^|main^|patreon]
 pause
 exit /b 2
 
@@ -42,6 +47,10 @@ goto :channel_ready
 
 :channel_v2
 set "LDS_UPDATE_CHANNEL=v2"
+goto :channel_ready
+
+:channel_patreon
+set "LDS_UPDATE_CHANNEL=patreon"
 goto :channel_ready
 
 :channel_stable
@@ -60,6 +69,13 @@ rem Keep the whole tail in one parsed block. The updater is then free to replace
 rem this BAT while it is running without making cmd.exe read half of a new file.
 (
     powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\update-docker-gpu.ps1" -Channel "%LDS_UPDATE_CHANNEL%" -InstallRoot "%~dp0."
+    if errorlevel 3 if not errorlevel 4 (
+        popd
+        echo.
+        echo LDS is already up to date. Nothing was changed.
+        pause
+        exit /b 0
+    )
     if errorlevel 1 (
         popd
         echo.

@@ -1,5 +1,6 @@
 @echo off
 setlocal DisableDelayedExpansion
+rem Channels: stable (default), v2, main (alias of v2) and patreon.
 rem Generic name for new installs. Do not CALL: transferring control to the
 rem compatibility entry point preserves its exact exit code and leaves only one
 rem channel-validation/update implementation to maintain.
