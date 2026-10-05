@@ -87,6 +87,9 @@ def test_shipped_configuration_waits_for_the_real_service(monkeypatch):
     shipped = json.loads((patreon.cfg.REPO_ROOT / 'store' / 'patreon.json').read_text(encoding='utf-8'))
     assert shipped['service_url'] == 'https://store.example.invalid'
     assert shipped['checkout_origin'] == 'https://www.patreon.com'
+    # Installations that stop updating keep this file: later members-only
+    # plugins reach them only through the namespace it ships.
+    assert shipped['catalog']['plugin_namespaces'] == ['patreon']
     with pytest.raises(StoreNotConfigured):
         patreon.load_patreon_config()
 
@@ -112,6 +115,13 @@ def test_test_instances_may_use_only_loopback_http(tmp_path, monkeypatch, url, o
     {'catalog': {'first_party_ids': ['not_an_lds_product']}},
     {'catalog': {'plugin_ids': ['missing_publisher']}},
     {'catalog': {'root': {}, 'root_path': 'root.json'}},
+    # Namespaces: the publisher part of EXTERNAL_ID, never one the code reserves.
+    {'catalog': {'plugin_namespaces': 'patreon'}},
+    {'catalog': {'plugin_namespaces': ['patreon', 'patreon']}},
+    {'catalog': {'plugin_namespaces': ['patreon.tools']}},
+    {'catalog': {'plugin_namespaces': ['Patreon']}},
+    {'catalog': {'plugin_namespaces': ['lds']}},
+    {'catalog': {'plugin_namespaces': ['con']}},
 ])
 def test_configuration_pins_patreon_and_an_explicit_scope(tmp_path, monkeypatch, over):
     write_config(tmp_path, monkeypatch, **over)

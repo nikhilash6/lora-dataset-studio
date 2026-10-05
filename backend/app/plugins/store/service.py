@@ -235,7 +235,7 @@ def prepare(registry, plugin_id, version, accepted_plan, *, check_change=None, u
                 provenance = {'id': m.id, 'publisher': 'lds', 'source': 'verified_store',
                               'manifest_sha256': digest, 'archive_sha256': target.hashes['sha256'],
                               'store': session.config.identity, 'target': release.target}
-            elif m.id not in session.config.external_ids:
+            elif not session.config.serves(m.id):
                 raise StoreError('This publisher is not approved for automatic installation.')
             old = registry.records.get(m.id) if registry else None
             flags = cfg.get('plugins.enabled') or {}

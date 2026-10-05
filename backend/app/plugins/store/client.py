@@ -32,6 +32,26 @@ from ..storage import managed_path
 _LOCK = threading.RLock()
 CATALOG_TARGET = 'catalog.json'
 MAX_CATALOG_BYTES = 2 * 1024 * 1024
+# Publisher namespaces no source may be granted whole. ``lds`` publishes the
+# first-party products, which only an explicit identifier grants (manifest.py,
+# official.py); a Windows device name cannot start a plugin folder or a package
+# target (install.py, store/tools/repository.py).
+RESERVED_NAMESPACES = frozenset({'lds', 'aux', 'con', 'nul', 'prn',
+                                 *(f'com{i}' for i in range(10)), *(f'lpt{i}' for i in range(10))})
+
+
+def namespace_of(plugin_id):
+    """The publisher part of an external ``publisher.plugin`` identifier, else None."""
+    if isinstance(plugin_id, str) and EXTERNAL_ID.fullmatch(plugin_id):
+        return plugin_id.split('.', 1)[0]
+    return None
+
+
+def valid_namespace(value):
+    """The publisher part of EXTERNAL_ID (``<value>.plugin`` is an external
+    identifier, so both grammars cannot drift apart), and not reserved."""
+    return (isinstance(value, str) and namespace_of(value + '.plugin') == value
+            and value not in RESERVED_NAMESPACES)
 
 
 class StoreError(ValueError):
@@ -77,6 +97,11 @@ class StoreConfig:
     # selects the grant service for this source's paid releases; a catalog
     # cannot claim it for itself.
     provider: str = ''
+    # Patreon only as well: publisher namespaces whose external identifiers
+    # this source serves without listing them, except the identifiers an
+    # operator source (sources.json) claims.
+    external_namespaces: frozenset = frozenset()
+    excluded_ids: frozenset = frozenset()
 
     def __post_init__(self):
         if self.provider not in ('', 'patreon'):
@@ -96,6 +121,14 @@ class StoreConfig:
                 or (self.scoped_ids and self.scoped_ids != self.official_ids | self.external_ids)):
             raise StoreError('Catalog permissions must match its selected plugin identifiers.')
         object.__setattr__(self, 'scoped_ids', frozenset(self.scoped_ids))
+        namespaces, excluded = self.external_namespaces, self.excluded_ids
+        if (not isinstance(namespaces, (set, frozenset)) or not isinstance(excluded, (set, frozenset))
+                or (namespaces and self.provider != 'patreon')
+                or any(not valid_namespace(name) for name in namespaces)
+                or any(namespace_of(pid) not in namespaces or pid in self.selected_ids for pid in excluded)):
+            raise StoreError('Catalog namespaces must name unreserved publishers and exclude only their own identifiers.')
+        object.__setattr__(self, 'external_namespaces', frozenset(namespaces))
+        object.__setattr__(self, 'excluded_ids', frozenset(excluded))
         targets = self.additional_catalog_targets
         if (not isinstance(targets, (tuple, list)) or len(targets) > 4
                 or any(not isinstance(name, str)
@@ -109,8 +142,23 @@ class StoreConfig:
         return self.scoped_ids or self.external_ids
 
     @property
+    def scoped(self):
+        """False for a catalog its root alone authorizes (the public one)."""
+        return bool(self.selected_ids or self.external_namespaces)
+
+    def serves(self, plugin_id):
+        """Listed, or an external identifier of a served namespace that no
+        operator source claims. A namespace never reaches an LDS identifier."""
+        return plugin_id in self.selected_ids or (
+            namespace_of(plugin_id) in self.external_namespaces and plugin_id not in self.excluded_ids)
+
+    @property
     def identity(self):
         scope = json.dumps(sorted(self.selected_ids)).encode() if self.selected_ids else b''
+        if self.external_namespaces:
+            # Absent otherwise: existing sources keep their identity and cache.
+            scope += b'\0' + json.dumps({'namespaces': sorted(self.external_namespaces),
+                                         'excluded': sorted(self.excluded_ids)}).encode()
         if self.additional_catalog_targets:
             scope += b'\0' + json.dumps(self.additional_catalog_targets).encode()
         return hashlib.sha256(self.root + self.metadata_url.encode() + b'\0' + self.target_url.encode() + scope).hexdigest()
@@ -220,7 +268,7 @@ def config_for_plugins(plugin_ids):
             or any(not isinstance(pid, str) for pid in requested)):
         raise StoreError('Select valid plugin identifiers.')
     sources = load_additional_configs()
-    selected = {next((index for index, source in enumerate(sources) if pid in source.selected_ids), -1)
+    selected = {next((index for index, source in enumerate(sources) if source.serves(pid)), -1)
                 for pid in requested}
     if len(selected) > 1:
         raise StoreError('Update plugins from different catalogs separately.')

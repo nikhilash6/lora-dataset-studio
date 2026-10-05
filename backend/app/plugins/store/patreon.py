@@ -24,7 +24,7 @@ from ... import config as cfg
 from ..admin import is_admin, require_admin
 from ..manifest import EXTERNAL_ID
 from ..official import OFFICIAL_IDS
-from .client import StoreConfig, StoreError, StoreNotConfigured, load_config
+from .client import StoreConfig, StoreError, StoreNotConfigured, load_config, namespace_of, valid_namespace
 from .commerce import CommerceClient, ServiceRefused, _origin
 
 CONFIG_ENV = 'LDS_STORE_PATREON_CONFIG'
@@ -61,6 +61,9 @@ class PatreonConfig:
     root: bytes | None
     first_party_ids: frozenset
     plugin_ids: frozenset
+    # Publishers whose external identifiers the catalog serves without a list:
+    # a members-only plugin published later appears with no core update.
+    plugin_namespaces: frozenset = frozenset()
 
     @property
     def commerce(self):
@@ -117,6 +120,13 @@ def _ids(value, *, first_party):
     return frozenset(value)
 
 
+def _namespaces(value):
+    if (not isinstance(value, list) or len(value) > 20 or len(set(value)) != len(value)
+            or any(not valid_namespace(name) for name in value)):
+        raise ValueError('invalid plugin namespaces')
+    return frozenset(value)
+
+
 def _root(catalog, directory):
     if 'root' in catalog and 'root_path' in catalog:
         raise ValueError('ambiguous Patreon catalog root')
@@ -157,7 +167,8 @@ def load_patreon_config():
             raise ValueError('invalid Patreon catalog')
         config = PatreonConfig(service, checkout, join, _root(catalog, path.parent),
                                _ids(catalog.get('first_party_ids', []), first_party=True),
-                               _ids(catalog.get('plugin_ids', []), first_party=False))
+                               _ids(catalog.get('plugin_ids', []), first_party=False),
+                               _namespaces(catalog.get('plugin_namespaces', [])))
     except (OSError, ValueError, KeyError, TypeError) as exc:
         raise StoreError('The Patreon access configuration is invalid.') from exc
     # RFC 2606 reserves .invalid: the shipped placeholder can never resolve.
@@ -166,7 +177,7 @@ def load_patreon_config():
     return config
 
 
-def _store_config(config, first_party, external):
+def _store_config(config, first_party, external, claimed=frozenset()):
     if config.root is None:
         raise StoreNotConfigured('The Patreon catalog is not connected on this installation yet.')
     try:
@@ -176,17 +187,21 @@ def _store_config(config, first_party, external):
     if first_party & primary:
         raise StoreError('The Patreon catalog cannot replace primary first-party products.')
     selected = first_party | external
+    namespaces = config.plugin_namespaces
     return StoreConfig(config.service_url + '/tuf/metadata/', config.service_url + '/tuf/targets/',
-                       config.root, first_party, external, selected, (), provider='patreon')
+                       config.root, first_party, external, selected, (), provider='patreon',
+                       external_namespaces=namespaces,
+                       excluded_ids=frozenset(pid for pid in claimed if namespace_of(pid) in namespaces))
 
 
 def patreon_plugin_source(claimed=frozenset()):
-    """Plugin source for the configured identifiers that no operator source claims."""
+    """Plugin source for the configured identifiers and namespaces, minus the
+    identifiers an operator source claims."""
     config = load_patreon_config()
     first_party, external = config.first_party_ids - claimed, config.plugin_ids - claimed
-    if not first_party and not external:
+    if not first_party and not external and not config.plugin_namespaces:
         return None
-    return _store_config(config, first_party, external)
+    return _store_config(config, first_party, external, claimed)
 
 
 def patreon_core_source():

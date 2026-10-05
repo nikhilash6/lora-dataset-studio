@@ -23,7 +23,8 @@ answer counts as membership, and the service checks it again for every download.
   "catalog": {
     "root": null,
     "first_party_ids": [],
-    "plugin_ids": []
+    "plugin_ids": [],
+    "plugin_namespaces": ["patreon"]
   }
 }
 ```
@@ -37,10 +38,19 @@ answer counts as membership, and the service checks it again for every download.
   Patreon catalog, so the file ships alone in the Windows ZIP and both Docker
   images. `root_path` (relative to the file) is accepted instead, for test
   instances. Without a root the Patreon catalog and core channel stay off.
-- `first_party_ids` (LDS identifiers) and `plugin_ids` (`publisher.plugin`)
-  are the only products the Patreon catalog may provide. An identifier also
-  listed by a local [private catalog](private-catalogs.md) stays with that
-  source. A product of the public catalog cannot be listed here.
+- The Patreon catalog provides the identifiers it lists, `first_party_ids`
+  (LDS identifiers) and `plugin_ids` (`publisher.plugin`), and every external
+  identifier whose publisher part is in `plugin_namespaces`. A members-only
+  plugin published later as `patreon.<name>` therefore appears in every
+  installation without a core update. A namespace uses the publisher grammar
+  of plugin identifiers (2-32 lowercase letters, digits or `_`, starting with
+  a letter); `lds` and Windows device names are refused.
+- A namespace never grants an LDS identifier: those stay explicit
+  `first_party_ids`, and a product of the public catalog cannot be listed.
+- An identifier also listed by a local [private catalog](private-catalogs.md)
+  stays with that source, inside a namespace too. No other source serves an
+  identifier of these namespaces: not the public catalog, and not a private
+  catalog that does not list it.
 
 `LDS_STORE_PATREON_CONFIG` points a test instance at another file with the
 same format. The TUF repository is read from `<service_url>/tuf/metadata/`

@@ -45,7 +45,7 @@ def parse_catalog(data, config):
     try:
         for product in products:
             plugin_id = product['id']
-            if config.selected_ids and plugin_id not in config.selected_ids:
+            if config.scoped and not config.serves(plugin_id):
                 continue
             if plugin_id in result:
                 raise ValueError('duplicate product')
@@ -57,7 +57,7 @@ def parse_catalog(data, config):
                 manifest = parse_manifest(release['manifest'], Path('.'), official=plugin_id in config.official_ids)
                 if manifest.bundled or manifest.id != plugin_id or manifest.contract['schema_version'] != 2:
                     raise ValueError('invalid package identity')
-                if not manifest.official and plugin_id not in config.external_ids:
+                if not manifest.official and not config.serves(plugin_id):
                     raise ValueError('publisher is not approved for this store')
                 version = Version(manifest.version)
                 if version in versions:
