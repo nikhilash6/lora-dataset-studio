@@ -69,16 +69,18 @@ active membership the review offers Connect Patreon and Join on Patreon.
 
 The Patreon catalog signs `core-releases.json` (`lds-core-releases/1`). Each
 release names its `commit`, its public `base`, a Git `bundle` of `base..commit`
-whose only ref is `refs/heads/patreon`, and a ZIP `archive`. Versions follow
-the app's `YYYY.MM.DD[.N]` scheme. Lengths and hashes come only from the TUF
-target metadata; bytes come only through grants for `lds_core`.
+whose only ref is `refs/heads/patreon`, a ZIP `archive`, and, for Docker, a
+`source` archive of the commit's complete tree
+(`core/lds-core-<version>.source.zip`; optional in older releases). Versions
+follow the app's `YYYY.MM.DD[.N]` scheme. Lengths and hashes come only from the
+TUF target metadata; bytes come only through grants for `lds_core`.
 
 | Installation | Behavior |
 | --- | --- |
 | Git checkout | Downloads the verified bundle, reads it into a private ref, then fast-forwards only. Local commits, modified tracked files or a diverged history refuse, like `git pull --ff-only`. LDS restarts itself. |
 | Pinokio | Same fast-forward. Pinokio keeps the restart: Stop, Update (installs changed requirements), Start. Until then LDS accepts no new work. |
 | ZIP | Downloads the verified archive and applies it with the existing staged swap, backup and rollback, then restarts. |
-| Docker | Not applied: see the limit below. The installed version keeps working. |
+| Docker | Installed from the host with `update-docker.bat patreon`, which the Updates card shows to members. See below. |
 
 No update is applied while generation, training, captioning, a bank or dataset
 operation, an installation or another restart is in progress: the same idle
@@ -100,17 +102,27 @@ Pinokio's Update tab tolerates that state instead of failing.
 - Item statuses in the library keep the existing values (`active`, `revoked`,
   `verification_required`); an inactive membership must not use another value.
 
-### Docker limit
+### Docker
 
-A container cannot replace its own image, and the host update script does not
-apply Patreon releases yet. Two gaps remain before it can:
+A container cannot replace its own image, so the Windows host updater installs
+Patreon releases: `update-docker.bat patreon` (ZIP installations; a Git
+checkout is refused unchanged).
 
-1. The host must verify the bytes itself. Applying an archive that the container
-   wrote to its data folder would let anything running in the container, plugins
-   and ComfyUI custom nodes included, run code on the host at the next update.
-   Proposed: the host updater reads `service_url` from its own checkout, checks
-   the staged archive against the service's target metadata over TLS (the same
-   trust it gives GitHub today), then uses the existing ZIP transaction.
-2. Docker installations are full source trees, and the host updater requires
-   the Docker files. The catalog needs a full-tree archive for them, separate
-   from the Windows ZIP layout.
+1. It starts a disposable container of the current image, never the running
+   one: ComfyUI, plugins and the app do not start. That container runs
+   `python -m app.services.patreon_core fetch-source`, the app's own client:
+   TUF from the root shipped in the image, the membership grant, then the
+   length and SHA-256 of the signed target metadata.
+2. It mounts exactly two folders: the lane's data folder read-only, for the
+   installation's Patreon connection, and a fresh folder of this update only,
+   which no other container shares. Nothing the running container can write,
+   plugins and ComfyUI custom nodes included, is ever applied on the host.
+3. The host copies the archive out of that folder, checks it against the
+   manifest written beside it, then uses the usual transaction: backup, code
+   switch, image rebuild, health check and rollback.
+
+When no newer Patreon release exists, nothing changes. The Docker updater never
+installs an older `APP_VERSION` than the installed one, on any channel, so a
+double-click on `update-docker.bat` cannot take a Patreon installation back to
+an older public release. A release published without a `source` archive stays
+unavailable to Docker; the installed version keeps working.
