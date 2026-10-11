@@ -53,6 +53,15 @@ test('the code of the Patreon page is asked after Continue on Patreon and while 
   assert.match(updates, field)
 })
 
+test('without administration the membership still shows, and says where to connect', () => {
+  const remote = render(PatreonAccessActions, { state: state({ ...UNLINKED, can_manage: false }) })
+  assert.match(remote, /<button[^>]*disabled=""[^>]*>Connect Patreon</)
+  assert.match(remote, /needs local administration/)
+  assert.doesNotMatch(render(PatreonAccessActions, { state: state(UNLINKED) }), /needs local administration/)
+  const unread = render(PatreonUpdates, { patreon: { status: 'unavailable', message: 'Patreon is offline.' } })
+  assert.match(unread, /Patreon is offline\./)
+})
+
 test('the Patreon block of the Updates card renders each channel state', () => {
   const ready = { status: 'ready', update_available: true, install_mode: 'git',
     release: { version: '2026.10.20', notes: ['Members feature'] } }

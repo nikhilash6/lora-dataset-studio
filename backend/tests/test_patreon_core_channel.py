@@ -488,7 +488,12 @@ def test_status_reports_the_channel_without_applying(repos, service, client, mon
     assert status['release']['version'] == VERSION and status['update_available'] is True
     assert status['access']['status'] == 'not_connected' and status['can_apply'] is False
     assert service.grants() == [] and head(repos.user) == repos.base
-    assert client.get('/api/update/patreon', environ_base={'REMOTE_ADDR': '198.51.100.8'}).status_code == 403
+    # Docker's bridge and LAN browsers read the channel too; only installing needs administration.
+    remote = client.get('/api/update/patreon', environ_base={'REMOTE_ADDR': '198.51.100.8'})
+    assert remote.status_code == 200 and remote.json['release']['version'] == VERSION
+    assert remote.json['can_manage'] is False and status['can_manage'] is True
+    assert client.post('/api/update/patreon/apply', json={},
+                       environ_base={'REMOTE_ADDR': '198.51.100.8'}).status_code == 403
 
 
 def test_cached_status_still_reads_a_new_membership(repos, service, client, monkeypatch):

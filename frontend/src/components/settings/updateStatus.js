@@ -88,9 +88,21 @@ export function progressPercent(p) {
   return Math.max(0, Math.min(100, Math.round((p.downloaded || 0) / p.total * 100)))
 }
 
+/* A failed read of GET /api/update/patreon, as a status the block can show:
+   the block says so instead of disappearing. */
+export function patreonCheckFailure(error) {
+  const message = typeof error?.body?.error === 'string' ? error.body.error : ''
+  return { status: 'unavailable',
+    message: message || 'The Patreon update channel could not be checked. Check again in a moment.' }
+}
+
+export const PATREON_ADMIN_REASON = 'Install it from the computer that runs LDS: '
+  + 'installing an update needs local administration.'
+
 /* The Patreon channel block of the Updates card, from GET /api/update/patreon.
    kind: hidden | unavailable | none | current | restart | install | host | join | blocked.
-   Never offers an install the server said it cannot apply (can_apply). `host`:
+   Never offers an install the server said it cannot apply (can_apply), nor one
+   this browser may not request (can_manage false: Docker bridge or LAN). `host`:
    Docker, where the host updater installs the release (host_command). */
 export function patreonUpdateView(p) {
   if (!p || p.status === 'not_configured') return { kind: 'hidden' }
@@ -107,6 +119,9 @@ export function patreonUpdateView(p) {
       : { kind: 'none' }
   }
   if (p.blocked_reason) return { kind: 'blocked', text: `${version} is available to Patreon members.`, reason: p.blocked_reason }
+  if (p.can_apply && p.can_manage === false) {
+    return { kind: 'blocked', text: `${version} is available with your Patreon membership.`, reason: PATREON_ADMIN_REASON }
+  }
   if (p.can_apply) return { kind: 'install', text: `${version} is available with your Patreon membership.` }
   if (p.entitled && typeof p.host_command === 'string' && p.host_command) {
     return { kind: 'host', text: `${version} is available with your Patreon membership.`, command: p.host_command }

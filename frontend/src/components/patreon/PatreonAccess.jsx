@@ -2,8 +2,8 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ExternalLink, RefreshCw } from 'lucide-react';
 import { apiFetch, postJson } from '../../api/fetchClient.js';
 import {
-  CODE_PROMPT, JUST_JOINED_HINT, PATREON_ACCESS_SUMMARY, PATREON_PRO_SUMMARY, membershipLabel, patreonActions,
-  safeAuthorizeUrl, safeJoinUrl, safeRequestUrl,
+  ADMIN_HINT, CODE_PROMPT, JUST_JOINED_HINT, PATREON_ACCESS_SUMMARY, PATREON_PRO_SUMMARY, membershipLabel,
+  patreonActions, safeAuthorizeUrl, safeJoinUrl, safeRequestUrl,
 } from './patreonModel.js';
 
 const ENDPOINT = '/api/plugins/store/patreon';
@@ -128,6 +128,7 @@ export function PatreonAccessActions({ state, compact = false }) {
       <p className="text-xs text-content-muted">Approve LDS on Patreon, then type the code shown there below. This link expires after a few minutes.</p>
     </div>}
     {askCode && <ConfirmCode busy={busy} disabled={!canManage} onConfirm={confirm} />}
+    {!canManage && (actions.connect || askCode) && <p className="text-xs text-content-muted">{ADMIN_HINT}</p>}
     {error && <p role="alert" className="text-sm text-amber-500">{error}</p>}
   </div>;
 }

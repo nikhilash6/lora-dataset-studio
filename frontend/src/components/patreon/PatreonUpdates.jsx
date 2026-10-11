@@ -79,7 +79,8 @@ export default function PatreonUpdates({ patreon, installed = null, error = '', 
       <div className="space-y-2">
         <p className="text-content"><span aria-hidden>⬆</span> {view.text} Your installed version keeps working.</p>
         <Notes release={patreon.release} />
-        <PatreonJoin access={patreon.access} onChanged={onChanged} />
+        <PatreonJoin access={patreon.access && { ...patreon.access, can_manage: patreon.can_manage }}
+          onChanged={onChanged} />
       </div>
     )
   } else if (view.kind === 'blocked') {

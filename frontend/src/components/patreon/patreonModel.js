@@ -21,6 +21,11 @@ export const CODE_PROMPT = 'Enter the code shown on the Patreon page';
 export const FREE_TRIAL_TEXT = 'Patreon free trials do not include LDS access. '
   + 'Access starts with your first payment on Patreon.';
 
+// Reading the membership needs no administration; changing it does (Docker's
+// bridge and LAN browsers are not local administration).
+export const ADMIN_HINT = 'Connecting Patreon needs local administration: use the computer that runs LDS, '
+  + 'or unlock installation with the plugin admin token under Plugins.';
+
 const TIERS = Object.freeze({ member: 'LDS Member', pro: 'LDS Pro' });
 
 export function tierLabel(tier) {

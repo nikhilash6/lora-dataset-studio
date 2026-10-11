@@ -359,9 +359,11 @@ def access_summary(client=None):
 
 
 def register_patreon_routes(bp):
-    """Same administration and host CSRF as the commerce routes."""
-    def invoke(operation):
-        if (denied := require_admin()) is not None:
+    """Same administration and host CSRF as the commerce routes for every
+    change. Reading the membership needs no administration, so a browser
+    behind Docker's bridge or on the LAN still sees it (``can_manage`` false)."""
+    def invoke(operation, *, administration=True):
+        if administration and (denied := require_admin()) is not None:
             return denied
         try:
             result = operation(PatreonClient())
@@ -374,7 +376,8 @@ def register_patreon_routes(bp):
             return jsonify(error=str(exc), code=exc.code, status='refused'), 409
         except (StoreError, OSError):
             return jsonify(error='Patreon could not be reached or refused the request. Installed plugins '
-                                 'and this version of LDS keep working.', status='unavailable', patreon=None), 409
+                                 'and this version of LDS keep working.', status='unavailable', patreon=None,
+                           can_manage=is_admin()), 409
 
     def changed(result):
         from ...services import patreon_core
@@ -387,7 +390,7 @@ def register_patreon_routes(bp):
 
     @bp.get('/patreon')
     def patreon_status():
-        return invoke(access_summary)
+        return invoke(access_summary, administration=False)
 
     @bp.post('/patreon/link')
     def patreon_link():

@@ -353,7 +353,12 @@ def test_routes_require_admin_and_csrf_and_never_return_credentials(remote):
     remote[0].extend([Response({'client_id': CLIENT_ID, 'client_secret': SECRET}, 201), link_reply(url)])
     assert client.post('/api/plugins/store/patreon/link', json={}).status_code == 400
     token = client.get('/csrf').json['token']
-    assert client.get('/api/plugins/store/patreon', environ_base={'REMOTE_ADDR': '198.51.100.8'}).status_code == 403
+    # Reading needs no administration (Docker bridge, LAN browser); every change does.
+    remote_read = client.get('/api/plugins/store/patreon', environ_base={'REMOTE_ADDR': '198.51.100.8'})
+    assert remote_read.status_code == 200 and remote_read.json['can_manage'] is False
+    assert remote_read.json['patreon']['linked'] is False
+    assert client.post('/api/plugins/store/patreon/link', json={}, headers={'X-CSRFToken': token},
+                       environ_base={'REMOTE_ADDR': '198.51.100.8'}).status_code == 403
     assert client.post('/api/plugins/store/patreon/link', json={'next': 'x'},
                        headers={'X-CSRFToken': token}).status_code == 409
     response = client.post('/api/plugins/store/patreon/link', json={}, headers={'X-CSRFToken': token})

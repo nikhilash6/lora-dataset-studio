@@ -3,7 +3,7 @@ import { apiFetch, postJson } from '../../api/fetchClient'
 import DiagnosticReport from '../common/DiagnosticReport'
 import DockerUpdateInstructions from '../common/DockerUpdateInstructions'
 import PinokioUpdateInstructions from '../common/PinokioUpdateInstructions'
-import { installMode, zipUpdateHeadline, progressLabel, progressPercent } from './updateStatus'
+import { installMode, patreonCheckFailure, zipUpdateHeadline, progressLabel, progressPercent } from './updateStatus'
 import PatreonUpdates from '../patreon/PatreonUpdates'
 import { Card } from './primitives'
 import { versionLabel } from '../../utils/versionLabel'
@@ -21,8 +21,8 @@ function UpdatesCard() {
   const [applying, setApplying] = useState(false)
   const [phase, setPhase] = useState('')     // '' | 'pulling' | 'restarting'
   const [progress, setProgress] = useState(null)   // ZIP mode: {phase, downloaded, total}
-  // Patreon core channel (GET /api/update/patreon). Null while unknown or when
-  // this session may not manage it; the public card then works as before.
+  // Patreon core channel (GET /api/update/patreon, readable without plugin
+  // administration). Null only while the first answer is pending.
   const [patreon, setPatreon] = useState(null)
   const [patreonError, setPatreonError] = useState('')
   const [patreonInstalled, setPatreonInstalled] = useState(null)
@@ -36,7 +36,7 @@ function UpdatesCard() {
       .catch(() => { /* best-effort — the manual button stays available */ })
     apiFetch('/api/update/patreon', { background: true })
       .then((d) => { if (alive) setPatreon((prev) => prev || d) })
-      .catch(() => { /* not administered here, or offline: the public card stands */ })
+      .catch((e) => { if (alive) setPatreon((prev) => prev || patreonCheckFailure(e)) })
     return () => { alive = false }
   }, [])
 
@@ -44,7 +44,13 @@ function UpdatesCard() {
     try {
       setPatreon(await apiFetch('/api/update/patreon?force=1', { background: true }))
       setPatreonError('')
-    } catch { /* keep the last answer; the public check reports connectivity */ }
+    } catch (e) {
+      // Keep the last answer and say this check failed; with no answer yet,
+      // the block itself shows the failure.
+      const failure = patreonCheckFailure(e)
+      setPatreon((prev) => prev || failure)
+      setPatreonError(patreon ? failure.message : '')
+    }
   }
 
   const check = async () => {

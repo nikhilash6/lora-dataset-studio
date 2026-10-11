@@ -14,6 +14,7 @@ import {
   zipUpdateHeadline,
   progressPercent,
   progressLabel,
+  patreonCheckFailure,
   patreonUpdateView,
 } from './updateStatus.js';
 
@@ -145,4 +146,19 @@ test('the Patreon block offers an install only when the server can apply it', ()
   assert.equal(patreonUpdateView({ status: 'ready', update_available: false, on_channel: true,
     release: { version: '2026.10.20' } }).text, 'Up to date on the Patreon channel (v2026.10.20).')
   assert.equal(patreonUpdateView({ status: 'ready', update_available: false }).kind, 'none')
+})
+
+test('the Patreon block is read without administration and says why it cannot install here', () => {
+  const ready = { status: 'ready', release: { version: '2026.10.20' }, update_available: true }
+  // LAN browser: the server can apply, this browser may not ask it to.
+  const remote = patreonUpdateView({ ...ready, can_apply: true, entitled: true, can_manage: false })
+  assert.equal(remote.kind, 'blocked')
+  assert.match(remote.reason, /computer that runs LDS/)
+  assert.equal(patreonUpdateView({ ...ready, can_apply: true, entitled: true, can_manage: true }).kind, 'install')
+  // A failed read shows a message instead of hiding the block.
+  const failed = patreonUpdateView(patreonCheckFailure(Object.assign(new Error('HTTP 503'), { status: 503 })))
+  assert.equal(failed.kind, 'unavailable')
+  assert.match(failed.text, /could not be checked/)
+  assert.equal(patreonUpdateView(patreonCheckFailure({ body: { error: 'Patreon is offline.' } })).text,
+    'Patreon is offline.')
 })

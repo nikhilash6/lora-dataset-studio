@@ -779,13 +779,13 @@ def update_apply():
 @bp.get('/update/patreon')
 def update_patreon_status():
     """The Patreon core channel: latest signed release, membership, and whether
-    this install shape can apply it. Uses the installation's Patreon link, so
-    it needs the same administration as the Store purchase routes."""
-    from ..plugins.admin import require_admin
+    this install shape can apply it. Reading needs no plugin administration: a
+    browser behind Docker's bridge or on the LAN sees the channel too, and the
+    Updates card never sends the admin token. ``can_manage`` says whether this
+    request could install; the apply route keeps requiring administration."""
+    from ..plugins.admin import is_admin
     from ..services import patreon_core
-    if (denied := require_admin()) is not None:
-        return denied
-    response = jsonify(patreon_core.status(force=bool(request.args.get('force'))))
+    response = jsonify({**patreon_core.status(force=bool(request.args.get('force'))), 'can_manage': is_admin()})
     response.headers['Cache-Control'] = 'no-store'
     return response
 
