@@ -145,7 +145,7 @@ export function patreonUpdateView(p) {
     return { kind: 'blocked', text: `${version} is available to Patreon members.`,
       reason: 'Patreon could not verify your membership right now. Check again in a few minutes.' }
   }
-  if (!p.entitled) return { kind: 'join', text: `${version} is available to Patreon members (LDS Member and LDS Pro).` }
+  if (!p.entitled) return { kind: 'join', text: `${version} is available to Patreon members (LDS Member).` }
   return { kind: 'blocked', text: `${version} is available to Patreon members.`,
     reason: 'This installation cannot apply it right now. Check again later.' }
 }

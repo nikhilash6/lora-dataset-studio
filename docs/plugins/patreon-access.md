@@ -1,9 +1,8 @@
 # Patreon access
 
 New features, exclusive plugins and LDS updates are reserved for Patreon
-members (LDS Member and LDS Pro). The installed version and installed plugins
-keep working when a membership ends; new downloads and updates need an active
-membership. LDS Pro adds custom plugin requests, handled outside the app.
+members (LDS Member). The installed version and installed plugins keep working
+when a membership ends; new downloads and updates need an active membership.
 
 The app never sees Patreon credentials. **Connect Patreon** asks the operator's
 service for a one-time authorization link on `www.patreon.com`. After you

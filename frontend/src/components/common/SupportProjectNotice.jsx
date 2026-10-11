@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Link } from 'react-router';
 import { Heart, X } from 'lucide-react';
-import { PATREON_ACCESS_SUMMARY, PATREON_PRO_SUMMARY } from '../patreon/patreonModel.js';
+import { PATREON_ACCESS_SUMMARY } from '../patreon/patreonModel.js';
 
 // A new key on purpose: this notice now announces Patreon access, so people
 // who dismissed the earlier support appeal ('lds:support-notice-dismissed')
@@ -30,7 +30,7 @@ export default function SupportProjectNotice() {
       <div className="min-w-0 flex-1">
         <p className="text-sm font-medium text-content">LDS updates now come through Patreon</p>
         <p className="mt-0.5 text-xs leading-relaxed text-content-muted">
-          {PATREON_ACCESS_SUMMARY} {PATREON_PRO_SUMMARY}
+          {PATREON_ACCESS_SUMMARY}
         </p>
         <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1">
           <a href={PATREON_PAGE} target="_blank" rel="noopener noreferrer"

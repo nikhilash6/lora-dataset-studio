@@ -110,7 +110,7 @@ export default function Catalog({ catalog, installed, filter = 'all', onFilterCh
 function PatreonPlanAccess({ names, adminToken, initial, busy, onRecheck }) {
   const state = usePatreonAccess(adminToken, initial);
   return <div className="space-y-2 rounded-lg border border-primary/40 p-3" role="status" data-patreon-required>
-    <p className="text-sm">{names.join(', ')} {names.length === 1 ? 'is' : 'are'} available to Patreon members (LDS Member and LDS Pro).
+    <p className="text-sm">{names.join(', ')} {names.length === 1 ? 'is' : 'are'} available to Patreon members (LDS Member).
       Installed plugins keep working; new downloads and updates need an active membership.</p>
     <p className="text-sm text-content-muted">{state.access ? membershipLabel(state.access) : 'Checking Patreon…'}</p>
     <PatreonAccessActions state={state} compact />

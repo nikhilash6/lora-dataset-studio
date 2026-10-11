@@ -53,10 +53,10 @@ test('a pending approval asks for the code, and a free trial says when access st
   assert.match(membershipLabel(linked({ reason: 'free_trial' })), /^Active Patreon membership/);
 });
 
-test('labels name the tiers and never carry a price', () => {
+test('labels name the LDS Member tier and never carry a price', () => {
   assert.equal(tierLabel('member'), 'LDS Member');
-  assert.equal(tierLabel('pro'), 'LDS Pro');
-  assert.equal(membershipLabel(linked({ tier: 'pro' })), 'Active Patreon membership · LDS Pro');
+  assert.equal(tierLabel('pro'), '');  // No Pro tier is offered: an operator-configured one stays unnamed.
+  assert.equal(membershipLabel(linked({ tier: 'pro' })), 'Active Patreon membership');
   assert.match(membershipLabel({ status: 'not_configured' }), /not available/);
   assert.doesNotMatch(PATREON_ACCESS_SUMMARY, /[$€£]|\d+\s*(per|a)\s*month/i);
   assert.equal(isPatreonRelease({ price: { kind: 'paid', provider: 'patreon' } }), true);

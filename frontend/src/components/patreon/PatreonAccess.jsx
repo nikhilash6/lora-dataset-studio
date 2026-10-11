@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ExternalLink, RefreshCw } from 'lucide-react';
 import { apiFetch, postJson } from '../../api/fetchClient.js';
 import {
-  ADMIN_HINT, CODE_PROMPT, JUST_JOINED_HINT, PATREON_ACCESS_SUMMARY, PATREON_PRO_SUMMARY, membershipLabel,
+  ADMIN_HINT, CODE_PROMPT, JUST_JOINED_HINT, PATREON_ACCESS_SUMMARY, membershipLabel,
   patreonActions, safeAuthorizeUrl, safeJoinUrl, safeRequestUrl,
 } from './patreonModel.js';
 
@@ -93,7 +93,8 @@ function ConfirmCode({ busy, disabled, onConfirm }) {
   </form>;
 }
 
-/* Connect / Join / Disconnect / Request a custom plugin, plus the one-time
+/* Connect / Join / Disconnect / Request a custom plugin (only for a `pro` tier,
+   so never without an operator-configured one), plus the one-time
    "Continue on Patreon" link and the code it leads to. No request leaves the
    app on mount, and opening Patreon is always a plain link the user clicks. */
 export function PatreonAccessActions({ state, compact = false }) {
@@ -141,7 +142,7 @@ export default function PatreonCard({ adminToken = '' }) {
   if (access?.status === 'not_configured') return null;
   return <section aria-label="Patreon membership" className="space-y-3 rounded-xl border border-border bg-surface p-5" data-patreon-card>
     <h2 className="text-lg font-semibold">Patreon membership</h2>
-    <p className="text-sm text-content-muted">{PATREON_ACCESS_SUMMARY} {PATREON_PRO_SUMMARY}</p>
+    <p className="text-sm text-content-muted">{PATREON_ACCESS_SUMMARY}</p>
     <p className="text-sm font-medium" role="status">{access ? membershipLabel(access) : 'Checking Patreon…'}</p>
     {patreon?.status === 'active' && patreon.valid_until && <p className="text-sm text-content-muted">
       Next renewal on Patreon: {new Date(patreon.valid_until).toLocaleDateString()} (as reported by Patreon).

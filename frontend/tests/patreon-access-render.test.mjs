@@ -121,10 +121,11 @@ test('a Patreon product is labelled and promises no screenshots', () => {
   assert.doesNotMatch(html, /Screenshots coming soon/)
 })
 
-test('the announcement names both tiers and no price', () => {
+test('the announcement names the LDS Member tier and no price', () => {
   const html = render(() => createElement(MemoryRouter, null, createElement(SupportProjectNotice)))
   assert.match(html, /LDS updates now come through Patreon/)
-  assert.match(html, /LDS Member and LDS Pro/)
+  assert.match(html, /Patreon members \(LDS Member\)\./)
+  assert.doesNotMatch(html, /LDS Pro|custom plugin/i)
   assert.match(html, /href="\/plugins\?tab=purchases"/)
   assert.doesNotMatch(html, /[$€£]/)
 })

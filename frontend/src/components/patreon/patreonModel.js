@@ -5,9 +5,7 @@
 export const PATREON_AUTHORIZE_PREFIX = 'https://www.patreon.com/oauth2/authorize?';
 
 export const PATREON_ACCESS_SUMMARY = 'New features, exclusive plugins and LDS updates are reserved for '
-  + 'Patreon members (LDS Member and LDS Pro). The version you have stays free and keeps working.';
-
-export const PATREON_PRO_SUMMARY = 'LDS Pro members can also request custom plugins.';
+  + 'Patreon members (LDS Member). The version you have stays free and keeps working.';
 
 // Patreon offers no lookup by user: a linked non-member becomes active through
 // the creator's webhook, or by connecting again.
@@ -26,7 +24,9 @@ export const FREE_TRIAL_TEXT = 'Patreon free trials do not include LDS access. '
 export const ADMIN_HINT = 'Connecting Patreon needs local administration: use the computer that runs LDS, '
   + 'or unlock installation with the plugin admin token under Plugins.';
 
-const TIERS = Object.freeze({ member: 'LDS Member', pro: 'LDS Pro' });
+// One offered tier. The service reports `pro` only for an operator-configured
+// pro tier, none since 2026-10-11; it keeps its request link but no name.
+const TIERS = Object.freeze({ member: 'LDS Member' });
 
 export function tierLabel(tier) {
   return TIERS[tier] || '';
@@ -78,8 +78,9 @@ export function membershipLabel(access) {
 }
 
 /* Which actions to offer. Connect (again) and Join while not an active member,
-   Disconnect while linked, custom requests for active Pro members, and the
-   code field while an approval on Patreon waits for it. */
+   Disconnect while linked, the request link only for an active `pro` tier (so
+   never without an operator-configured one), and the code field while an
+   approval on Patreon waits for it. */
 export function patreonActions(access) {
   const patreon = access?.patreon;
   const ready = Boolean(patreon) && access?.status !== 'not_configured' && access?.status !== 'unavailable';

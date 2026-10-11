@@ -45,8 +45,7 @@ open a GitHub issue with the *Feature request* template.
 
 LoRA Dataset Studio is built in the open, and the version you have stays free
 and keeps working. New features, exclusive plugins and LDS updates are reserved
-for [Patreon](https://www.patreon.com/c/Loraperfectgf) members, at two levels:
-**LDS Member** and **LDS Pro**. LDS Pro members can also request custom plugins.
+for [Patreon](https://www.patreon.com/c/Loraperfectgf) members (**LDS Member**).
 
 Connect Patreon under **Plugins → Purchases**. Members-only plugins then install
 from the Store like any other plugin, and new LDS versions appear under
