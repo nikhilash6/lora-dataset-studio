@@ -84,6 +84,12 @@ import { SETUP_DEEP_LINK_STEPS } from './hooks/useSetupSteps.js';
 // Newest first. Prepend new waves at the top.
 export const WHATS_NEW = [
   {
+    id: '2026-10-11-z-lmstudio-framing',
+    date: '2026-10-11',
+    title: 'Classify framing reads close-ups again with LM Studio',
+    blurb: 'With LM Studio as the local LLM provider, Classify framing labelled every image as bust. LDS now sends the image before the question, as it does with Ollama, so close-ups come back as face again. Thanks to vitokorn for reporting this.',
+  },
+  {
     id: '2026-10-11-runs-page-local-training',
     date: '2026-10-11',
     title: 'Follow local training on the Runs page again',

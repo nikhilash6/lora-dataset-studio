@@ -258,6 +258,25 @@ def test_the_image_goes_out_as_a_standard_data_uri(app, monkeypatch, tmp_path):
     assert _sent_image_fields(calls)[0].startswith('data:image/jpeg;base64,')
 
 
+def test_the_image_comes_before_the_question(app, monkeypatch):
+    """#74, measured with Qwen3-VL 8B on LM Studio: asked before the image,
+    framing classify answered `bust` for close-ups and full bodies alike.
+    With the image first, as Ollama renders it, close-ups read as `face`."""
+    calls = []
+
+    def _post(url, *a, **kw):
+        calls.append(kw)
+        return _Resp(200, {'choices': [{'message': {'content': '{}'}}]})
+
+    monkeypatch.setattr(lms.requests, 'get', _router({'/api/v1/models': V1_BODY}))
+    monkeypatch.setattr(lms.requests, 'post', _post)
+    monkeypatch.setattr(lms, '_data_uri_ok', None)
+    with app.app_context():
+        lms.describe_image(_jpeg(), 'classify', as_json=True)
+    content = calls[0]['json']['messages'][0]['content']
+    assert [part['type'] for part in content] == ['image_url', 'text']
+
+
 def test_a_build_that_refuses_the_data_uri_gets_exactly_one_retry(app, monkeypatch):
     """Belt and braces for the builds where #1752 was live. The retry fires ONLY
     on that error — any other failure must not burn a second inference."""
