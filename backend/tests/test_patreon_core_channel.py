@@ -334,9 +334,51 @@ def test_local_work_refuses_and_changes_nothing(repos, service, gates, local):
     assert head(repos.user) == mine
     assert updater.patreon_marker(repos.user) is None
     assert gates == []
+    assert service.grants() == []  # Refused before any download.
     if local == 'modified':
-        assert service.grants() == []  # Refused before any download.
         assert (repos.user / 'app.txt').read_text(encoding='utf-8') == 'edited\n'
+
+
+def test_a_checkout_ahead_of_the_release_waits_for_the_next_one(repos, service, client, gates, monkeypatch):
+    """The public branch moved past the release's base and this checkout took
+    it: the release cannot fast-forward it. Say so before any download, instead
+    of downloading the bundle and then refusing as if the user had local work."""
+    newer = commit(repos.public, {'app.txt': 'public 2\n'}, 'public after the release base')
+    git(repos.user, 'pull', '-q', '--ff-only', 'origin', 'v2')
+    assert head(repos.user) == newer
+    monkeypatch.setattr(patreon_core, 'REPO_ROOT', repos.user)
+    publish_release(service, repos)
+    enrolled()
+    status = client.get('/api/update/patreon?force=1').json
+    assert status['update_available'] is True and status['entitled'] is True
+    assert status['can_apply'] is False and status['blocked_reason'] == patreon_core.AHEAD_OF_RELEASE
+    assert 'ahead of the members release' in patreon_core.AHEAD_OF_RELEASE
+    with pytest.raises(patreon_core.CoreChannelError, match='ahead of the members release'):
+        patreon_core.apply_git(repos.user, patreon_core.read_channel())
+    assert service.grants() == [] and gates == [] and head(repos.user) == newer
+
+
+def test_the_next_release_fast_forwards_from_the_installed_one(repos, service, gates):
+    """HEAD is the installed Patreon release, which is not behind the next
+    public base: the check before the download must still let it through."""
+    publish_release(service, repos)
+    enrolled()
+    patreon_core.apply_git(repos.user, patreon_core.read_channel())
+    patreon_core._installed.clear()
+    newer = commit(repos.public, {'app.txt': 'public 2\n'}, 'public bridge 2')
+    git(repos.line, 'fetch', '-q', 'origin', 'v2')
+    git(repos.line, 'merge', '-q', '--no-edit', 'origin/v2')
+    second = commit(repos.line, {'patreon_feature.txt': 'members 2\n'}, 'patreon release 2')
+    bundle = repos.tmp / 'second.bundle'
+    git(repos.line, 'bundle', 'create', str(bundle), 'patreon', '^' + newer)
+    version = '2099.01.03'
+    names = {'bundle': f'core/lds-core-{version}.bundle', 'archive': f'core/lds-core-{version}.zip'}
+    service.publish([entry(second, newer, version=version, **names)],
+                    {names['bundle']: bundle.read_bytes(), names['archive']: b'unused'})
+    assert patreon_core.status(repos.user, force=True)['blocked_reason'] is None
+    result, _ = patreon_core.apply_git(repos.user, patreon_core.read_channel())
+    assert result['changed'] is True and head(repos.user) == second
+    assert updater.patreon_marker(repos.user) == second
 
 
 def test_missing_public_base_is_fetched_before_reading_the_bundle(repos, service, gates):

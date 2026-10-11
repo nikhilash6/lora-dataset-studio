@@ -85,7 +85,7 @@ TUF target metadata; bytes come only through grants for `lds_core`.
 
 | Installation | Behavior |
 | --- | --- |
-| Git checkout | Downloads the verified bundle, reads it into a private ref, then fast-forwards only. Local commits, modified tracked files or a diverged history refuse, like `git pull --ff-only`. LDS restarts itself. |
+| Git checkout | Downloads the verified bundle, reads it into a private ref, then fast-forwards only. Local commits, modified tracked files or a diverged history refuse, like `git pull --ff-only`, before any download; a checkout that already took public commits newer than the release waits for the next Patreon release. LDS restarts itself. |
 | Pinokio | Same fast-forward. Pinokio keeps the restart: Stop, Update (installs changed requirements), Start. Until then LDS accepts no new work. |
 | ZIP | Downloads the verified archive and applies it with the existing staged swap, backup and rollback, then restarts. |
 | Docker | Installed from the host with `update-docker.bat patreon`, which the Updates card shows to members. See below. |

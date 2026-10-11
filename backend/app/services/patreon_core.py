@@ -70,6 +70,13 @@ DOCKER_HOST_COMMAND = 'update-docker.bat patreon'
 DOCKER_HOST_UPDATE = ('LDS cannot update itself inside Docker. On the computer that runs Docker, run '
                       f'{DOCKER_HOST_COMMAND} in the LDS folder.')
 PATREON_REQUIRED = 'This update is available to Patreon members. Connect Patreon or join, then check again.'
+AHEAD_OF_RELEASE = ('This installation is ahead of the members release: it already has public changes that '
+                    'release does not include. Wait for the next Patreon release; your installed version keeps '
+                    'working.')
+LOCAL_HISTORY = ('This checkout has local commits or follows another history, so it cannot fast-forward to the '
+                 'Patreon release. Your files were not changed.')
+MISSING_BASE = ('This update builds on public LDS history that this checkout does not have yet. Check the '
+                'connection to the public repository and retry.')
 PINOKIO_HOLD = ('An LDS update was installed. Stop the app in Pinokio, click Update, then Start it '
                 'to finish.')
 
@@ -207,6 +214,29 @@ def _git_has_release(root, release):
                                       and updater._is_ancestor(root, release.commit, 'HEAD'))
 
 
+def _fast_forward_blocker(root, release, *, fetch=False):
+    """Why HEAD cannot fast-forward to the release, decided before any
+    download; None when it can. It can when HEAD is the release's public base
+    or behind it, or exactly the Patreon release installed here, which the next
+    one builds on. A base this checkout lacks is fetched with ``fetch``;
+    without it (status) the apply decides, after fetching."""
+    if _head(root) == updater.patreon_marker(root):
+        return None
+    target = release.commit if _has_commit(root, release.commit) else release.base
+    if target == release.base and not _has_commit(root, release.base):
+        if not fetch:
+            return None
+        _git(root, 'fetch', '--quiet', '--no-tags', 'origin', PUBLIC_BRANCH)
+        if not _has_commit(root, release.base):
+            raise CoreChannelError(MISSING_BASE)
+    if updater._is_ancestor(root, 'HEAD', target):
+        return None
+    # Public commits only: the next release will carry them. Otherwise the
+    # checkout holds work of its own.
+    public = f'refs/remotes/origin/{PUBLIC_BRANCH}'
+    return AHEAD_OF_RELEASE if updater._is_ancestor(root, 'HEAD', public) else LOCAL_HISTORY
+
+
 _status_cache = {'ts': 0.0, 'data': None}
 _installed = {}
 _apply_lock = threading.Lock()
@@ -245,6 +275,8 @@ def status(root=None, *, force=False):
                 if result['update_available'] and _dirty(root):
                     result['blocked_reason'] = ('Modified tracked files would be overwritten. Commit or '
                                                 'discard them, then check again.')
+                elif result['update_available']:
+                    result['blocked_reason'] = _fast_forward_blocker(root, release)
             else:
                 result['update_available'] = release.version > APP_VERSION
             if mode == 'docker' and result['update_available']:
@@ -298,8 +330,7 @@ def _fetch_bundle(root, bundle, release):
         # the same network access as an ordinary update check.
         _git(root, 'fetch', '--quiet', '--no-tags', 'origin', PUBLIC_BRANCH)
         if not _has_commit(root, release.base):
-            raise CoreChannelError('This update builds on public LDS history that this checkout does not '
-                                   'have yet. Check the connection to the public repository and retry.')
+            raise CoreChannelError(MISSING_BASE)
     fetch = _git(root, 'fetch', '--quiet', '--no-tags', str(bundle), f'+{BUNDLE_REF}:{INCOMING_REF}')
     fetched = (_git(root, 'rev-parse', '--verify', '--quiet', INCOMING_REF + '^{commit}').stdout or '').strip()
     if fetch.returncode != 0 or fetched != release.commit:
@@ -320,8 +351,7 @@ def _fast_forward(root, release):
     if _dirty(root):
         raise CoreChannelError('Modified tracked files would be overwritten. Commit or discard them, then retry.')
     if not updater._is_ancestor(root, 'HEAD', release.commit):
-        raise CoreChannelError('This checkout has local commits or follows another history, so it cannot '
-                               'fast-forward to the Patreon release. Your files were not changed.')
+        raise CoreChannelError(LOCAL_HISTORY)
     before = _head(root)
     old = updater.patreon_marker(root)
     # A marker already in HEAD's history keeps protecting the new HEAD, which
@@ -354,6 +384,11 @@ def apply_git(root, channel, *, pinokio=False):
         raise CoreChannelError('Modified tracked files would be overwritten. Commit or discard them, then retry.')
     if _git_has_release(root, release):
         return {'ok': True, 'changed': False, 'version': release.version}, None
+    # Decided before the download: a checkout ahead of the release, or with
+    # work of its own, is told so instead of after fetching the bundle.
+    blocker = _fast_forward_blocker(root, release, fetch=True)
+    if blocker:
+        raise CoreChannelError(blocker)
     folder = managed_path(cfg.data_dir(), 'plugin-store', 'core')
     bundle = _download(release, release.bundle, channel.bundle_info,
                        destination=folder / (channel.bundle_info.hashes['sha256'] + '.bundle'))
@@ -362,8 +397,7 @@ def apply_git(root, channel, *, pinokio=False):
     finally:
         Path(bundle).unlink(missing_ok=True)
     if not updater._is_ancestor(root, 'HEAD', release.commit):
-        raise CoreChannelError('This checkout has local commits or follows another history, so it cannot '
-                               'fast-forward to the Patreon release. Your files were not changed.')
+        raise CoreChannelError(LOCAL_HISTORY)
     gate = restart.freeze_when_idle(IDLE_ACTION)
     try:
         result = _fast_forward(root, release)
