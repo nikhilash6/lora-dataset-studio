@@ -860,3 +860,27 @@ def test_zip_install_refuses_an_archive_of_another_version(repos, service, app, 
     assert (root / 'backend/app/version.py').read_text(encoding='utf-8') == "APP_VERSION = 'old'\n"
     assert restarts == [] and updater.patreon_channel() is None
     assert all(gate.released for gate in gates)
+
+
+def test_versions_compare_as_numbers(tmp_path, monkeypatch):
+    """YYYY.MM.DD.N: .10 comes after .9, which a string comparison denies."""
+    assert updater.version_newer('2026.10.11.10', '2026.10.11.9') is True
+    assert updater.version_newer('2026.10.11.9', '2026.10.11.10') is False
+    assert updater.version_newer('2026.10.11.1', '2026.10.11') is True
+    assert updater.version_newer('2026.10.11', '2026.10.11') is False
+    items = [entry('1' * 40, '2' * 40, version=v, bundle=f'core/lds-core-{v}.bundle', archive=f'core/lds-core-{v}.zip')
+             for v in ('2026.10.11.9', '2026.10.11.10', '2026.10.11')]
+    releases = patreon_core.parse_core_releases({'format': 'lds-core-releases/1', 'releases': items})
+    assert [release.version for release in releases] == ['2026.10.11.10', '2026.10.11.9', '2026.10.11']
+    # The channel status and the Docker fetch compare the same way.
+    monkeypatch.setenv('LDS_DATA_DIR', str(tmp_path / 'data'))
+    monkeypatch.setattr('app.version.APP_VERSION', '2026.10.11.9')
+    monkeypatch.setattr(patreon_core, 'install_mode', lambda root=None: 'zip')
+    monkeypatch.setattr(patreon_core, 'access_summary', lambda: {'status': 'not_connected', 'patreon': None})
+    monkeypatch.setattr(patreon_core, 'read_channel', lambda: patreon_core.Channel(releases[0], None, None))
+    assert patreon_core.status(tmp_path, force=True)['update_available'] is True
+    monkeypatch.setattr(patreon_core, '_copy_credential', lambda data, work: None)
+    out = tmp_path / 'out'
+    out.mkdir()
+    with pytest.raises(patreon_core.CoreChannelError, match='no Docker package'):  # Newer: it goes on.
+        patreon_core.fetch_source(out, tmp_path / 'data', newer_than='2026.10.11.9')

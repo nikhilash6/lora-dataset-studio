@@ -718,8 +718,8 @@ def update_check():
             latest = (j.get('tag_name') or '').lstrip('vV').strip()
             out['latest'] = latest or None
             out['url'] = j.get('html_url') or out['url']
-            # Date-based versions (YYYY.MM.DD[.N]) -> plain string comparison.
-            out['update_available'] = bool(latest) and latest > APP_VERSION
+            # Date-based versions (YYYY.MM.DD[.N]), compared as numbers.
+            out['update_available'] = updater.version_newer(latest, APP_VERSION)
             # can_apply: this release ships a downloadable ZIP asset, so a packaged
             # (non-git) install can update in-app instead of only linking out to the
             # releases page. The button keys off this for a ZIP install.

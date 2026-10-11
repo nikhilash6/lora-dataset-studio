@@ -165,7 +165,25 @@ PATREON_RELEASE_REASON = ('This installation runs a Patreon release of LDS. A pu
                           'and remove the Patreon changes, so it is not installed. Install updates from the '
                           'Patreon channel in Settings › Maintenance, or choose to install the public release '
                           'anyway.')
-_CHANNEL_VERSION = re.compile(r'\d{4}\.\d{2}\.\d{2}(?:\.\d+)?\Z')
+# APP_VERSION's scheme (backend/app/version.py).
+_DATE_VERSION = re.compile(r'\d{4}\.\d{2}\.\d{2}(?:\.\d+)?\Z')
+
+
+def version_newer(candidate, installed) -> bool:
+    """Whether ``candidate`` is newer than ``installed``. YYYY.MM.DD[.N]
+    compares as numbers: 2026.10.11.10 is newer than 2026.10.11.9, which a
+    string comparison denies, and a date with .N is newer than the date alone.
+    Anything else keeps the historical plain string comparison."""
+    if not isinstance(candidate, str) or not isinstance(installed, str):
+        return False
+    if _DATE_VERSION.fullmatch(candidate) and _DATE_VERSION.fullmatch(installed):
+        return tuple(map(int, candidate.split('.'))) > tuple(map(int, installed.split('.')))
+    return candidate > installed
+
+
+def version_key(value):
+    """Sort key of a YYYY.MM.DD[.N] version, numeric like :func:`version_newer`."""
+    return tuple(map(int, value.split('.')))
 
 
 def _patreon_channel_path(data=None) -> Path:
@@ -186,7 +204,7 @@ def patreon_channel(data=None):
     try:
         value = json.loads(raw)
         version, commit = value['version'], value['commit']
-        if (value.get('format') != PATREON_CHANNEL_FORMAT or not _CHANNEL_VERSION.fullmatch(version)
+        if (value.get('format') != PATREON_CHANNEL_FORMAT or not _DATE_VERSION.fullmatch(version)
                 or not re.fullmatch(r'[0-9a-f]{40}', commit)):
             raise ValueError
     except (ValueError, TypeError, KeyError, AttributeError, RecursionError):
@@ -640,7 +658,7 @@ def apply_zip_update(root=None, *, release=None, on_progress=None, download=None
     latest = rel.get('version')
     if not latest:
         return {'ok': False, 'reason': 'the latest release has no version tag to update to.'}
-    if not (latest > APP_VERSION):          # date-based versions -> plain string comparison
+    if not version_newer(latest, APP_VERSION):    # YYYY.MM.DD[.N], compared as numbers
         return {'ok': True, 'changed': False, 'from': APP_VERSION, 'to': latest}
     if not rel.get('zip_url') and download is None:
         repo = _cfg_get('updates.repo') or 'perfectgf/lora-dataset-studio'
@@ -783,7 +801,7 @@ def start_zip_update(root=None, *, force_public=False) -> dict:
     latest = rel.get('version')
     if not latest:
         return {'ok': False, 'reason': 'the latest release has no version tag to update to.'}
-    if not (latest > APP_VERSION):
+    if not version_newer(latest, APP_VERSION):
         return {'ok': True, 'changed': False, 'from': APP_VERSION, 'to': latest}
     if not rel.get('zip_url'):
         repo = _cfg_get('updates.repo') or 'perfectgf/lora-dataset-studio'

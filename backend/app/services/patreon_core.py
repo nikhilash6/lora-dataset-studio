@@ -60,8 +60,8 @@ INCOMING_REF = 'refs/lds/patreon/incoming'
 PUBLIC_BRANCH = 'v2'
 STATUS_TTL_SECONDS = 600
 IDLE_ACTION = 'installing the LDS update'
-# APP_VERSION's own scheme, zero-padded, so that plain string comparison is
-# version comparison exactly as in updater.apply_zip_update.
+# APP_VERSION's own scheme. Compared as numbers (updater.version_newer): a
+# string comparison would put 2026.10.11.9 after 2026.10.11.10.
 _VERSION = re.compile(r'\d{4}\.\d{2}\.\d{2}(?:\.\d+)?\Z')
 _SHA = re.compile(r'[0-9a-f]{40}\Z')
 
@@ -163,7 +163,7 @@ def parse_core_releases(value):
                                       item['bundle'], item['archive'], item.get('source')))
     except (ValueError, TypeError, AttributeError, OverflowError):
         raise StoreError('The Patreon core release list is invalid.') from None
-    return sorted(result, key=lambda release: release.version, reverse=True)
+    return sorted(result, key=lambda release: updater.version_key(release.version), reverse=True)
 
 
 def read_channel():
@@ -284,7 +284,7 @@ def status(root=None, *, force=False):
                 elif result['update_available']:
                     result['blocked_reason'] = _fast_forward_blocker(root, release)
             else:
-                result['update_available'] = release.version > APP_VERSION
+                result['update_available'] = updater.version_newer(release.version, APP_VERSION)
             if mode == 'docker' and result['update_available']:
                 # The container never replaces its own image; the host updater
                 # applies the release source archive (fetch_source below).
@@ -424,7 +424,7 @@ def apply_zip(root, channel):
     """Start the async staged swap of the verified archive (packaged install)."""
     from ..version import APP_VERSION
     release, info = channel.release, channel.archive_info
-    if not release.version > APP_VERSION:
+    if not updater.version_newer(release.version, APP_VERSION):
         return {'ok': True, 'changed': False, 'version': release.version}
     # Fail before a long download when work is already running; the worker
     # checks again, holding the gate, right before the first file moves.
@@ -591,7 +591,8 @@ def fetch_source(out, data, *, newer_than=None):
     with _private_data_dir() as work:
         _copy_credential(data, work)
         channel = read_channel()
-        if channel is None or (newer_than is not None and not channel.release.version > newer_than):
+        if channel is None or (newer_than is not None
+                               and not updater.version_newer(channel.release.version, newer_than)):
             return {'status': 'current', 'version': channel.release.version if channel else None}
         release, info = channel.release, channel.source_info
         if info is None:

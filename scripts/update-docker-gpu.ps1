@@ -1495,12 +1495,23 @@ function Read-AppVersion([string]$Path) {
     return $found.Groups[1].Value
 }
 
+function Compare-AppVersion([string]$Left, [string]$Right) {
+    # YYYY.MM.DD[.N] (both checked against VersionPattern) compared as numbers,
+    # as the app does: 2026.10.11.10 is newer than 2026.10.11.9, which an
+    # ordinal comparison denies, and a date with .N is newer than the date alone.
+    $a = @($Left.Split('.') | ForEach-Object { [long]$_ })
+    $b = @($Right.Split('.') | ForEach-Object { [long]$_ })
+    for ($i = 0; $i -lt [Math]::Min($a.Count, $b.Count); $i++) {
+        if ($a[$i] -ne $b[$i]) { return [Math]::Sign($a[$i] - $b[$i]) }
+    }
+    return [Math]::Sign($a.Count - $b.Count)
+}
+
 function Assert-NoDowngrade([string]$StagedRoot, [string]$InstalledVersion) {
-    # Zero-padded YYYY.MM.DD[.N]: ordinal order is version order, as in the app.
     # Equal versions stay allowed, so a damaged installation can be reapplied.
     if (-not $InstalledVersion) { return }
     $staged = Read-AppVersion (Join-Path $StagedRoot 'backend\app\version.py')
-    if ($staged -and [string]::CompareOrdinal($staged, $InstalledVersion) -lt 0) {
+    if ($staged -and (Compare-AppVersion $staged $InstalledVersion) -lt 0) {
         throw ("This archive contains LDS v$staged, older than the installed v$InstalledVersion. " +
             'No file was changed. An installation updated from Patreon updates with: ' +
             'update-docker.bat patreon')
@@ -1644,7 +1655,7 @@ function Read-PatreonFetchResult([string]$OutDir, [string]$InstalledVersion) {
         throw 'The release manifest is invalid. No file was changed.'
     }
     $version = [string]$fields['version']
-    if ([string]::CompareOrdinal($version, $InstalledVersion) -le 0) {
+    if ((Compare-AppVersion $version $InstalledVersion) -le 0) {
         throw "The fetched release v$version is not newer than the installed v$InstalledVersion. No file was changed."
     }
     $archive = Join-Path $OutDir $script:PatreonArchiveName

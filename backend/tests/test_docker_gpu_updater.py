@@ -1656,3 +1656,25 @@ def test_bat_forwards_force_only_as_the_second_argument(tmp_path):
     refused = run("v2", "forced")
     assert refused.returncode == 2 and "Too many arguments" in refused.stdout
     assert not result.exists()
+
+
+def test_versions_compare_as_numbers_on_every_channel(tmp_path):
+    """2026.10.11.10 is newer than 2026.10.11.9, which an ordinal comparison
+    denies: neither a public channel nor the Patreon channel may refuse it."""
+    public = tmp_path / "public"
+    install = public / "numeric é !"
+    _make_install(install)
+    _write(install / "backend" / "app" / "version.py", "APP_VERSION = '2026.10.11.9'\n")
+    payload = _archive_payload()
+    payload["backend/app/version.py"] = b"APP_VERSION = '2026.10.11.10'\n"
+    public.mkdir(exist_ok=True)
+    result, launches, _ = _run_updater(public, install, archive=_write_archive(public, payload))
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert launches == ["LEGACY-NEW --update-rebuild"]
+
+    member = tmp_path / "patreon"
+    install, archive, docker = _patreon_setup(member, archive_version="2026.10.11.10")
+    _write(install / "backend" / "app" / "version.py", "APP_VERSION = '2026.10.11.9'\n")
+    result, launches, _, _ = _run_patreon(member, install, archive, docker, version="2026.10.11.10")
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert (install / "backend" / "app" / "version.py").read_text() == "APP_VERSION = '2026.10.11.10'\n"
