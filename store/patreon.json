@@ -6,7 +6,7 @@
   "catalog": {
     "root": null,
     "first_party_ids": [],
-    "plugin_ids": [],
+    "plugin_ids": ["local.creative_library"],
     "plugin_namespaces": ["patreon"]
   }
 }
