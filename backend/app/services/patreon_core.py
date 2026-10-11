@@ -298,7 +298,9 @@ def status(root=None, *, force=False):
     except (StoreError, OSError, ValueError) as exc:
         result.update(status='unavailable', message=str(exc) if isinstance(exc, StoreError)
                       else 'The Patreon update channel could not be checked.')
-    _status_cache.update(ts=now, data=result)
+    # Only a complete answer is reused: a failure is checked again next time.
+    if result['status'] == 'ready':
+        _status_cache.update(ts=now, data=result)
     return result
 
 

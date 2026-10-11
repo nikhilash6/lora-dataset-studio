@@ -816,3 +816,20 @@ def test_update_route_forwards_only_an_explicit_force(client, monkeypatch):
     client.post('/api/update/apply', json={'force_public': 'yes'})
     client.post('/api/update/apply', json={'force_public': True})
     assert calls == [{}, {}, {'force_public': True}]
+
+
+def test_status_never_caches_a_failed_check(tmp_path, monkeypatch):
+    """Only a `ready` answer is kept for ten minutes: once Patreon answers
+    again, the next check must say so instead of repeating the failure."""
+    monkeypatch.setenv('LDS_DATA_DIR', str(tmp_path / 'data'))
+    monkeypatch.setattr(patreon_core, 'install_mode', lambda root=None: 'zip')
+    monkeypatch.setattr(patreon_core, 'access_summary', lambda: {'status': 'not_connected', 'patreon': None})
+
+    def offline():
+        raise patreon_core.StoreError('The Patreon catalog could not be reached.')
+    monkeypatch.setattr(patreon_core, 'read_channel', offline)
+    assert patreon_core.status(tmp_path)['status'] == 'unavailable'
+    monkeypatch.setattr(patreon_core, 'read_channel', lambda: None)
+    assert patreon_core.status(tmp_path)['status'] == 'ready'
+    monkeypatch.setattr(patreon_core, 'read_channel', offline)
+    assert patreon_core.status(tmp_path)['status'] == 'ready'  # A ready answer is cached.
