@@ -689,11 +689,16 @@ def _packaged_install(root):
         (root / name).write_bytes(text.encode())  # Same bytes as the archive: no CRLF translation.
 
 
-def _release_zip(path):
+def _release_zip(path, *, built=VERSION, declared=VERSION):
+    """The layout of packaging/release_bundle.py: build_info.json carries the
+    version of the archive (``built``), version.py its APP_VERSION."""
+    files = {'backend/app/version.py': f"APP_VERSION = '{declared}'\n",
+             'backend/app/__init__.py': '', 'backend/run.py': 'print(2)\n',
+             'backend/requirements.txt': 'flask\n', 'frontend/dist/index.html': 'new ui\n'}
+    if built is not None:
+        files['build_info.json'] = json.dumps({'version': built, 'commit': '1' * 40})
     with zipfile.ZipFile(path, 'w') as archive:
-        for name, text in {'backend/app/version.py': f"APP_VERSION = '{VERSION}'\n",
-                           'backend/app/__init__.py': '', 'backend/run.py': 'print(2)\n',
-                           'backend/requirements.txt': 'flask\n', 'frontend/dist/index.html': 'new ui\n'}.items():
+        for name, text in files.items():
             archive.writestr('LoRA-Dataset-Studio/' + name, text)
     return path.read_bytes()
 
@@ -833,3 +838,25 @@ def test_status_never_caches_a_failed_check(tmp_path, monkeypatch):
     assert patreon_core.status(tmp_path)['status'] == 'ready'
     monkeypatch.setattr(patreon_core, 'read_channel', offline)
     assert patreon_core.status(tmp_path)['status'] == 'ready'  # A ready answer is cached.
+
+
+@pytest.mark.parametrize('built,declared', [('2099.01.01', VERSION), (VERSION, '2099.01.01'), (None, VERSION)])
+def test_zip_install_refuses_an_archive_of_another_version(repos, service, app, gates, monkeypatch, tmp_path,
+                                                           built, declared):
+    """Before any file moves, the archive's own version (build_info.json and
+    APP_VERSION) must be the signed release version."""
+    root = tmp_path / 'packaged'
+    _packaged_install(root)
+    archive = _release_zip(tmp_path / 'release.zip', built=built, declared=declared)
+    service.publish([entry(repos.release, repos.base)], {BUNDLE: repos.bundle, ARCHIVE: archive})
+    enrolled()
+    restarts = []
+    monkeypatch.setattr(updater, 'schedule_restart', lambda **kw: restarts.append(kw) or True)
+    monkeypatch.setattr(updater.os, 'chdir', lambda path: None)
+    with app.test_request_context('/api/update/patreon/apply', method='POST'):
+        assert patreon_core.apply_zip(root, patreon_core.read_channel())['ok'] is True
+    progress = _wait_for_worker()
+    assert progress['phase'] == 'error' and f'signed version {VERSION}' in progress['error']
+    assert (root / 'backend/app/version.py').read_text(encoding='utf-8') == "APP_VERSION = 'old'\n"
+    assert restarts == [] and updater.patreon_channel() is None
+    assert all(gate.released for gate in gates)

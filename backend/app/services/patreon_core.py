@@ -442,7 +442,8 @@ def apply_zip(root, channel):
     # public release never replaces this one silently (updater.patreon_channel).
     return updater.start_verified_zip_update(root, {'version': release.version, 'zip_size': info.length},
                                              download=download, reserve=reserve,
-                                             channel={'version': release.version, 'commit': release.commit})
+                                             channel={'version': release.version, 'commit': release.commit},
+                                             expected_version=release.version)
 
 
 def apply_response(root=None):

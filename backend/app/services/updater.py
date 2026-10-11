@@ -593,8 +593,25 @@ def apply_release_files(staged_root, repo_root, backup_root) -> list[str]:
         raise
 
 
+def _staged_versions(app_root):
+    """``(build_info.json version, APP_VERSION)`` of an extracted release;
+    None for whichever cannot be read."""
+    try:
+        info = json.loads((Path(app_root) / 'build_info.json').read_text(encoding='utf-8'))
+        built = info.get('version') if isinstance(info, dict) else None
+    except (OSError, ValueError):
+        built = None
+    try:
+        text = (Path(app_root) / 'backend' / 'app' / 'version.py').read_text(encoding='utf-8')
+        found = re.search(r"^APP_VERSION = '([^']+)'", text, re.MULTILINE)
+        declared = found[1] if found else None
+    except (OSError, ValueError):
+        declared = None
+    return built, declared
+
+
 def apply_zip_update(root=None, *, release=None, on_progress=None, download=None,
-                     before_install=None) -> dict:
+                     before_install=None, expected_version=None) -> dict:
     """Release-ZIP update for a NON-git install: resolve the latest release,
     download its ZIP asset, extract it, and swap the app's files in place
     (backing up the old ones; rolling back on failure). Restart is scheduled by
@@ -611,7 +628,9 @@ def apply_zip_update(root=None, *, release=None, on_progress=None, download=None
     `download(dest, on_bytes)` replaces the public asset download (the Patreon
     channel streams a granted, TUF-verified archive instead). `before_install()`
     runs after the archive is extracted and checked, right before the first file
-    moves; an exception there aborts with nothing replaced."""
+    moves; an exception there aborts with nothing replaced. `expected_version`
+    (the signed version of a verified archive) must be what the archive itself
+    declares, in build_info.json and APP_VERSION, or nothing is replaced."""
     root = Path(root or REPO_ROOT)
     from ..version import APP_VERSION
     from ..config import data_dir
@@ -666,6 +685,10 @@ def apply_zip_update(root=None, *, release=None, on_progress=None, download=None
     if not (app_root / 'backend' / 'app').is_dir() or not (app_root / 'backend' / 'run.py').exists():
         return {'ok': False,
                 'reason': 'the release archive is missing backend/ — refusing to swap.'}
+    if expected_version is not None and _staged_versions(app_root) != (expected_version, expected_version):
+        return {'ok': False,
+                'reason': f'the release archive does not contain the signed version {expected_version} '
+                          '(build_info.json and APP_VERSION must both name it). Nothing was changed.'}
     deps_changed = _requirements_changed(app_root, root)
     if before_install is not None:
         try:
@@ -796,7 +819,7 @@ def start_zip_update(root=None, *, force_public=False) -> dict:
             'total': rel.get('zip_size') or 0}
 
 
-def start_verified_zip_update(root, rel, *, download, reserve, channel=None) -> dict:
+def start_verified_zip_update(root, rel, *, download, reserve, channel=None, expected_version=None) -> dict:
     """Async ZIP update whose bytes come from `download` (the Patreon channel).
 
     Same progress state, file swap, backup and restart as the public ZIP path.
@@ -804,7 +827,8 @@ def start_verified_zip_update(root, rel, *, download, reserve, channel=None) -> 
     idle gate it froze (plugins/restart.py); the worker keeps that gate until
     the process exits, or releases it when nothing was installed. `channel`
     (``{'version', 'commit'}``) is recorded as the Patreon channel marker right
-    before the first file moves, and put back as it was if nothing installs."""
+    before the first file moves, and put back as it was if nothing installs.
+    `expected_version`: see :func:`apply_zip_update`."""
     root = Path(root or REPO_ROOT)
     from ..version import APP_VERSION
     with _zip_lock:
@@ -818,7 +842,8 @@ def start_verified_zip_update(root, rel, *, download, reserve, channel=None) -> 
                           **{'from': APP_VERSION, 'to': rel['version']})
     try:
         threading.Thread(target=_run_zip_update, args=(root, rel),
-                         kwargs={'download': download, 'reserve': reserve, 'channel': channel},
+                         kwargs={'download': download, 'reserve': reserve, 'channel': channel,
+                                 'expected_version': expected_version},
                          daemon=True).start()
     except Exception as exc:
         reason = f'The update worker could not start: {exc}'
@@ -831,7 +856,7 @@ def start_verified_zip_update(root, rel, *, download, reserve, channel=None) -> 
 
 
 def _run_zip_update(root, rel, *, download=None, reserve=None, channel=None,
-                    leave_patreon=False) -> None:
+                    leave_patreon=False, expected_version=None) -> None:
     """Worker body: run the update, mirror its phase into `_zip_state`, and on
     success schedule the restart. Apply failures land as phase ``error`` after
     their rollback; a later restart-scheduling failure instead records that the
@@ -857,7 +882,8 @@ def _run_zip_update(root, rel, *, download=None, reserve=None, channel=None,
             previous.append(write_patreon_channel(channel['version'], channel['commit']))
 
     hook = before_install if reserve is not None or channel is not None else None
-    res = apply_zip_update(root, release=rel, on_progress=cb, download=download, before_install=hook)
+    res = apply_zip_update(root, release=rel, on_progress=cb, download=download, before_install=hook,
+                           expected_version=expected_version)
     installed = bool(res.get('ok') and res.get('changed'))
     try:
         if previous and not installed:
