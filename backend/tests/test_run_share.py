@@ -252,3 +252,20 @@ def test_all_runs_exposes_share_keys(client, app):
     assert any(k.startswith('cloud-') for k in keys)
     # the active run is shareable via its pod-row key
     assert out['actives'] and all(a['share_key'].startswith('cloud-') for a in out['actives'])
+
+
+def test_runs_route_answers_without_cloud_plugin(client, app, monkeypatch):
+    """#75: without a plugin owning the Runs page, the core page polls this
+    route; its 404 hid both the live local run and the saved history."""
+    from app.services import lora_training
+    live_ds = _mkds(client)
+    done_ds = _mkds(client, name='Mia', trigger='mia')
+    live = _add_local_rec(app, live_ds)
+    done = _add_local_rec(app, done_ds)
+    monkeypatch.setattr(lora_training, 'training_status', lambda *a, **k: {
+        'in_progress': True, 'current': {'dataset_id': live_ds, 'name': 'Lola'}})
+    r = client.get('/api/dataset/train/runs?limit=15')
+    assert r.status_code == 200
+    body = r.get_json()
+    assert body['local_active']['record_id'] == live
+    assert [row['share_key'] for row in body['recent']] == [f'rec-{done}']

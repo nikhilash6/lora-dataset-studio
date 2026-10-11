@@ -84,6 +84,13 @@ import { SETUP_DEEP_LINK_STEPS } from './hooks/useSetupSteps.js';
 // Newest first. Prepend new waves at the top.
 export const WHATS_NEW = [
   {
+    id: '2026-10-11-runs-page-local-training',
+    date: '2026-10-11',
+    title: 'Follow local training on the Runs page again',
+    blurb: 'Without the Cloud training plugin, the Runs page showed HTTP 404 instead of your runs. It now shows your local training in progress and your saved runs. Thanks to somedude1001 for reporting this.',
+    to: '/cloud',
+  },
+  {
     id: '2026-09-29-video-plugin-startup',
     date: '2026-09-29',
     title: 'H3 plugins start correctly again',
