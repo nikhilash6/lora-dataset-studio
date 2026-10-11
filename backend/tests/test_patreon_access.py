@@ -458,6 +458,51 @@ def test_plan_asks_patreon_only_for_products_of_the_patreon_catalog(monkeypatch,
     assert plan['patreon_access'] == {'status': 'ready', 'patreon': inactive}
 
 
+def test_update_all_leaves_locked_patreon_plugins_out_of_the_batch(monkeypatch, tmp_path):
+    """One members-only plugin without an active membership must not block the
+    other updates: it leaves the batch, named, and the rest can be confirmed."""
+    monkeypatch.setenv('LDS_CONFIG', str(tmp_path / 'config.json'))
+    patreon_owner = SimpleNamespace(config=SimpleNamespace(provider='patreon'))
+    public_owner = SimpleNamespace(config=SimpleNamespace(provider=''))
+    owners = {'manga': patreon_owner, 'tool': public_owner, 'camera': public_owner}
+    names = {'manga': 'Manga Studio', 'tool': 'Tool', 'camera': 'Camera'}
+
+    def release(pid):
+        price = {'kind': 'paid', 'product': 'patreon_lds', 'provider': 'patreon'} if pid == 'manga' else {'kind': 'free'}
+        return SimpleNamespace(target=pid + '.ldsplugin', price=price,
+                               manifest=SimpleNamespace(id=pid, version='2.0.0', name=names[pid]),
+                               payload=lambda pid=pid: {'manifest': {'id': pid, 'name': names[pid], 'version': '2.0.0'}})
+
+    @contextmanager
+    def sessions(_plugin_id):
+        yield []
+    planned = []
+
+    def plan(_sessions, _registry, plugin_id, _version, *, update_only=False):
+        ids = [plugin_id] if isinstance(plugin_id, str) else list(plugin_id)
+        planned.append(ids)
+        return [release(pid) for pid in ids], 'x' * 64, set(ids), owners
+
+    class Patreon:
+        def library(self):
+            return {'status': 'ready', 'items': [], 'patreon': INACTIVE}
+    monkeypatch.setattr(service, '_plan_sessions', sessions)
+    monkeypatch.setattr(service, '_plan', plan)
+    monkeypatch.setattr(service, 'PatreonClient', Patreon)
+
+    result = service.preview_plan(None, ['camera', 'manga', 'tool'], update_only=True)
+    assert result['requested'] == ['camera', 'tool']
+    assert [p['manifest']['id'] for p in result['packages']] == ['camera', 'tool']
+    assert result['excluded'] == [{'id': 'manga', 'name': 'Manga Studio'}]
+    assert result['purchase_required'] == [] and result['patreon_required'] == []
+    assert planned[-1] == ['camera', 'tool']
+    # Alone, or outside Update all, the plugin keeps the membership prompt.
+    alone = service.preview_plan(None, ['manga'], update_only=True)
+    assert alone['patreon_required'] == ['manga'] and 'excluded' not in alone
+    chosen = service.preview_plan(None, ['manga', 'tool'])
+    assert chosen['patreon_required'] == ['manga'] and 'excluded' not in chosen
+
+
 @pytest.mark.parametrize('status,code,expected', [
     (403, 'acquisition_denied', patreon.MembershipRequired),
     (503, 'verification_required', patreon.VerificationUnavailable),

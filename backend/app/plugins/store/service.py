@@ -155,6 +155,24 @@ def _plan(sessions, registry, plugin_id, version, *, update_only=False):
 
 
 def preview_plan(registry, plugin_id, version=None, *, update_only=False):
+    """The reviewed plan. Update all (``update_only`` over several plugins)
+    leaves out the members-only plugins this installation may not download,
+    instead of blocking every other update: they keep their installed version
+    and are listed in ``excluded``. ``requested`` then names what the
+    confirmation must send back."""
+    plan = _preview_plan(registry, plugin_id, version, update_only=update_only)
+    if update_only and not isinstance(plugin_id, str):
+        locked = [pid for pid in plan['patreon_required'] if pid in plugin_id]
+        remaining = [pid for pid in plugin_id if pid not in locked]
+        if locked and remaining:
+            names = {package['manifest']['id']: package['manifest'].get('name') or package['manifest']['id']
+                     for package in plan['packages']}
+            plan = _preview_plan(registry, remaining, version, update_only=True)
+            plan['excluded'] = [{'id': pid, 'name': names.get(pid, pid)} for pid in locked]
+    return plan
+
+
+def _preview_plan(registry, plugin_id, version=None, *, update_only=False):
     with _plan_sessions(plugin_id) as sessions:
         changes, identity, needed, owners = _plan(sessions, registry, plugin_id, version, update_only=update_only)
         paid = [r.manifest.id for r in changes if r.target and r.price['kind'] == 'paid']

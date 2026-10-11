@@ -146,6 +146,10 @@ export function InstallPlan({ plan, busy, onConfirm, onCancel, onAcquire, restar
     <p className="text-sm text-content-muted">{plan.update_only
       ? `Your data and activation settings are kept. All updates are verified and prepared together. ${restart?.can_apply ? 'LDS will restart automatically once, then reload this page.' : restart?.how || 'Restart LDS once after preparation to apply all updates.'}`
       : 'Your data is kept. All listed plugins are prepared together and applied in one restart. The current features stay available until you apply the changes and restart LDS.'}</p>
+    {plan.excluded?.length > 0 && <p role="status" className="text-sm text-content-muted" data-store-excluded>
+      Not included: {plan.excluded.map(item => item.name || item.id).join(', ')}. {plan.excluded.length === 1 ? 'This update needs' : 'These updates need'} an
+      active Patreon membership; the installed {plan.excluded.length === 1 ? 'version keeps' : 'versions keep'} working. Connect Patreon under Purchases to include {plan.excluded.length === 1 ? 'it' : 'them'}.
+    </p>}
     {otherPurchase.length > 0 && <p role="status" className="text-sm text-content-muted">Open Purchases to connect this installation, activate a license or review the purchase terms for: {otherPurchase.join(', ')}.</p>}
     {patreonRequired.length > 0 && <PatreonPlanAccess names={patreonRequired.map(nameOf)} adminToken={adminToken}
       initial={plan.patreon_access} busy={busy} onRecheck={onRecheck} />}

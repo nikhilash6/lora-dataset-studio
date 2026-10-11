@@ -71,7 +71,9 @@ releases must be `{"kind": "paid", "product": …, "provider": "patreon"}`, and
 only the Patreon catalog may use that label. Installation and updates go
 through the usual review; the archive comes through a download grant from the
 Patreon service, checked against the signed length and SHA-256. Without an
-active membership the review offers Connect Patreon and Join on Patreon.
+active membership the review offers Connect Patreon and Join on Patreon, and
+**Update all** leaves the members-only plugins out of its batch, naming them,
+instead of blocking the other updates; their installed versions keep working.
 
 ## Core updates
 

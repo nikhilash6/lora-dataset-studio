@@ -100,6 +100,18 @@ test('an install review asks for a Patreon membership, not a purchase', () => {
   assert.doesNotMatch(html, /Open purchases/)
 })
 
+test('Update all goes ahead without the members-only plugins it had to leave out', () => {
+  const plan = { plan_id: 'x'.repeat(64), requested: ['tool'], update_only: true,
+    packages: [{ manifest: { id: 'tool', name: 'Tool', version: '2.0.0' }, action: 'install', previous_version: '1.0.0' }],
+    purchase_required: [], patreon_required: [], paid_packages: [], patreon_access: null,
+    excluded: [{ id: 'manga', name: 'Manga Studio' }] }
+  const html = render(InstallPlan, { plan, busy: false, onConfirm() {}, onCancel() {}, onAcquire() {}, onRecheck() {} })
+  assert.match(html, /Not included: Manga Studio/)
+  assert.match(html, /active Patreon membership/)
+  assert.match(html, /<button[^>]*>Update all<\/button>/)
+  assert.doesNotMatch(html, /<button[^>]*disabled=""[^>]*>Update all/)
+})
+
 test('a Patreon product is labelled and promises no screenshots', () => {
   const release = { manifest: { id: 'manga', name: 'Manga Studio', version: '1.2.0', description: 'Comics.' },
     price: { kind: 'paid', product: 'patreon_lds', provider: 'patreon' }, changelog: [],
