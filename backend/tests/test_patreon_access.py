@@ -22,7 +22,7 @@ CLIENT_ID = 'a' * 32
 SERVICE = 'https://patreon-service.example.test'
 JOIN = 'https://www.patreon.com/c/example'
 MEMBER = {'linked': True, 'status': 'active', 'tier': 'member', 'valid_until': '2026-11-04T00:00:00Z',
-          'join_url': JOIN, 'request_url': None}
+          'join_url': JOIN, 'request_url': None, 'pending': False, 'reason': None}
 PRO = {**MEMBER, 'tier': 'pro', 'request_url': 'https://requests.example.test/custom-plugin'}
 CONFIG = patreon.PatreonConfig(SERVICE, 'https://www.patreon.com', JOIN, None, frozenset(), frozenset())
 
@@ -169,11 +169,15 @@ def test_only_the_patreon_source_can_label_patreon_products():
 
 # --- Membership object and link ---------------------------------------------------
 
-INACTIVE = {'linked': True, 'status': 'inactive', 'tier': None, 'valid_until': None, 'join_url': JOIN, 'request_url': None}
+INACTIVE = {'linked': True, 'status': 'inactive', 'tier': None, 'valid_until': None, 'join_url': JOIN,
+            'request_url': None, 'pending': False, 'reason': None}
 
 
 @pytest.mark.parametrize('value', [MEMBER, PRO, INACTIVE, {**INACTIVE, 'status': 'verification_required'},
-                                   {**INACTIVE, 'linked': False}])
+                                   {**INACTIVE, 'linked': False},
+                                   # v1.1: an approval waiting for its code, and a free trial.
+                                   {**INACTIVE, 'linked': False, 'pending': True},
+                                   {**INACTIVE, 'reason': 'free_trial'}])
 def test_valid_membership_objects_are_kept_exactly(value):
     assert patreon.parse_membership(value) == value
 
@@ -189,6 +193,10 @@ def test_valid_membership_objects_are_kept_exactly(value):
     {**MEMBER, 'request_url': 'https://requests.example.test/form'},
     {**PRO, 'request_url': None}, {**PRO, 'request_url': 'http://requests.example.test/form'},
     {**PRO, 'request_url': 'https://requests.example.test/form#frag'},
+    # v1.1: `pending` is a boolean, `reason` null or "free_trial".
+    {**MEMBER, 'pending': None}, {**MEMBER, 'pending': 'false'}, {**MEMBER, 'pending': 0},
+    {key: value for key, value in MEMBER.items() if key != 'pending'},
+    {**INACTIVE, 'reason': 'trial'}, {**INACTIVE, 'reason': ''}, {**INACTIVE, 'reason': False},
 ])
 def test_membership_object_is_read_strictly(value):
     with pytest.raises(StoreError):
@@ -272,9 +280,63 @@ def test_library_accepts_external_plugin_identifiers(remote):
         client.library()
 
 
+# --- Confirmation code (PATREON-PROTOCOL v1.1) ---------------------------------------
+
+CONFIRM_REFUSALS = [('invalid_code', 403), ('code_expired', 403), ('too_many_attempts', 429),
+                    ('no_pending_link', 404), ('link_limit', 429)]
+
+
+def test_confirm_sends_the_code_of_the_patreon_page(remote):
+    client = connected(remote)
+    remote[0].append(Response({'status': 'linked'}))
+    assert client.confirm(' abcd-2345 ') == {'status': 'linked'}
+    method, address, options = remote[1][-1]
+    assert (method, address) == ('POST', SERVICE + '/v1/patreon/confirm')
+    assert options['json'] == {'code': 'ABCD2345'}
+    assert options['headers']['Authorization'] == 'Bearer ' + CLIENT_ID + '.' + SECRET
+
+
+@pytest.mark.parametrize('code,status', CONFIRM_REFUSALS)
+def test_confirm_names_each_refusal(remote, code, status):
+    client = connected(remote)
+    remote[0].append(Response({'error': code}, status))
+    with pytest.raises(patreon.PatreonRefusal) as refused:
+        client.confirm('ABCD-2345')
+    assert refused.value.code == code
+    assert str(refused.value) == patreon.CONFIRM_ERRORS[code]
+
+
+def test_each_confirmation_refusal_has_its_own_message():
+    assert set(patreon.CONFIRM_ERRORS) == {code for code, _ in CONFIRM_REFUSALS}
+    assert len(set(patreon.CONFIRM_ERRORS.values())) == len(CONFIRM_REFUSALS)
+
+
+@pytest.mark.parametrize('code', ['', 'ABCD-234', 'ABCD-23456', 'ABCD-2O45', 'ABCD-1234', 'ABCD_2345',
+                                  'X' * 40, None, 12345678])
+def test_a_malformed_code_never_spends_an_attempt(remote, code):
+    client = connected(remote)
+    calls = len(remote[1])
+    with pytest.raises(patreon.PatreonRefusal) as refused:
+        client.confirm(code)
+    assert refused.value.code == 'malformed_code' and len(remote[1]) == calls
+
+
+def test_confirm_without_a_connection_needs_no_network(remote):
+    with pytest.raises(patreon.PatreonRefusal) as refused:
+        patreon.PatreonClient().confirm('ABCD-2345')
+    assert refused.value.code == 'no_pending_link' and remote[1] == []
+
+
+def test_confirm_requires_the_service_answer(remote):
+    client = connected(remote)
+    remote[0].append(Response({'status': 'pending'}))
+    with pytest.raises(StoreError):
+        client.confirm('ABCD-2345')
+
+
 # --- Routes ---------------------------------------------------------------------------
 
-def test_routes_require_admin_and_csrf_and_never_return_credentials(remote):
+def routes_client():
     app = Flask(__name__)
     app.config.update(TESTING=True, SECRET_KEY='test-session-signing-only')
     CSRFProtect(app)
@@ -282,7 +344,11 @@ def test_routes_require_admin_and_csrf_and_never_return_credentials(remote):
     patreon.register_patreon_routes(bp)
     app.register_blueprint(bp)
     app.add_url_rule('/csrf', view_func=lambda: jsonify(token=generate_csrf()))
-    client = app.test_client()
+    return app.test_client()
+
+
+def test_routes_require_admin_and_csrf_and_never_return_credentials(remote):
+    client = routes_client()
     url = 'https://www.patreon.com/oauth2/authorize?state=abc'
     remote[0].extend([Response({'client_id': CLIENT_ID, 'client_secret': SECRET}, 201), link_reply(url)])
     assert client.post('/api/plugins/store/patreon/link', json={}).status_code == 400
@@ -296,6 +362,26 @@ def test_routes_require_admin_and_csrf_and_never_return_credentials(remote):
     assert response.headers['Cache-Control'] == 'no-store'
     status = client.get('/api/plugins/store/patreon')
     assert status.status_code == 409 and status.json['status'] == 'unavailable'  # No reply queued.
+
+
+def test_confirm_route_requires_admin_and_csrf_and_names_the_refusal(remote):
+    client = routes_client()
+    connected(remote)
+    path = '/api/plugins/store/patreon/confirm'
+    assert client.post(path, json={'code': 'ABCD-2345'}).status_code == 400  # No CSRF token.
+    headers = {'X-CSRFToken': client.get('/csrf').json['token']}
+    assert client.post(path, json={'code': 'ABCD-2345'}, headers=headers,
+                       environ_base={'REMOTE_ADDR': '198.51.100.8'}).status_code == 403
+    assert client.post(path, json={'code': 'ABCD-2345', 'next': 'x'}, headers=headers).status_code == 409
+    remote[0].append(Response({'error': 'code_expired'}, 403))
+    refused = client.post(path, json={'code': 'ABCD-2345'}, headers=headers)
+    assert refused.status_code == 409 and refused.json['code'] == 'code_expired'
+    assert refused.json['error'] == patreon.CONFIRM_ERRORS['code_expired']
+    remote[0].append(Response({'status': 'linked'}))
+    linked = client.post(path, json={'code': 'abcd2345'}, headers=headers)
+    assert linked.status_code == 200 and linked.json['status'] == 'linked'
+    assert linked.headers['Cache-Control'] == 'no-store' and SECRET not in linked.get_data(as_text=True)
+    assert remote[1][-1][2]['json'] == {'code': 'ABCD2345'}
 
 
 def test_route_reports_not_configured_on_the_shipped_placeholder(client, monkeypatch):

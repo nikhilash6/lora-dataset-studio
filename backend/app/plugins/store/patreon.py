@@ -4,7 +4,9 @@ The Patreon service is an operator-run acquisition service (HTTP contract v1
 plus its Patreon endpoints). LDS never handles Patreon credentials: the browser
 authorizes on www.patreon.com and the service records the link server-side.
 A callback page is never an entitlement; only the library response is, and the
-service checks membership again on every download grant.
+service checks membership again on every download grant. Since protocol v1.1
+the callback links nothing by itself: the Patreon page shows a code, and only
+typing it in LDS (``confirm``) links the installation that asked.
 
 ``store/patreon.json`` ships with the app. ``LDS_STORE_PATREON_CONFIG`` points
 a test instance at another file (HTTP is accepted for literal loopback only).
@@ -13,6 +15,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -37,6 +40,10 @@ LINK_LIFETIME_SECONDS = 600
 CLOCK_SKEW_SECONDS = 60
 STATUSES = frozenset({'active', 'inactive', 'verification_required'})
 TIERS = frozenset({'member', 'pro'})
+REASONS = (None, 'free_trial')
+# The code of the Patreon page: 8 characters of this alphabet, shown XXXX-XXXX.
+CODE_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789'
+_CODE = re.compile(f'[{CODE_ALPHABET}]{{8}}')
 
 
 class MembershipRequired(StoreError):
@@ -47,10 +54,29 @@ class VerificationUnavailable(StoreError):
     """The service could not verify the membership recently (``verification_required``)."""
 
 
+class PatreonRefusal(StoreError):
+    """A refusal the person can act on. ``code`` names it for the interface."""
+
+    def __init__(self, message, code):
+        super().__init__(message)
+        self.code = code
+
+
 MEMBERSHIP_REQUIRED = ('Your Patreon membership is not active for this download. Join on Patreon, or connect '
                        'Patreon again if you just joined, then retry. Installed plugins keep working.')
 VERIFICATION_UNAVAILABLE = ('Patreon could not verify your membership right now. Installed plugins and this '
                             'version of LDS keep working; try again in a few minutes.')
+MALFORMED_CODE = 'Enter the 8-character code shown on the Patreon page, for example ABCD-2345.'
+# The named errors of POST /v1/patreon/confirm.
+CONFIRM_ERRORS = {
+    'invalid_code': 'This code does not match the one shown on the Patreon page. Check it and try again.',
+    'code_expired': 'This code has expired. Press Connect Patreon again to get a new one.',
+    'too_many_attempts': 'Too many incorrect codes. Press Connect Patreon again to get a new code.',
+    'no_pending_link': ('No Patreon approval is waiting for this installation. Press Connect Patreon, approve '
+                        'LDS on Patreon, then enter the code shown there.'),
+    'link_limit': ('This Patreon membership has connected the maximum number of new installations for the '
+                   'last 30 days. Try again later.'),
+}
 
 
 @dataclass(frozen=True)
@@ -210,20 +236,34 @@ def patreon_core_source():
     return _store_config(config, config.first_party_ids, config.plugin_ids)
 
 
+def confirmation_code(value):
+    """The code typed by the person, as the service compares it: upper case,
+    without the dash or spaces. A malformed code never reaches the service,
+    where it would spend one of the five attempts."""
+    if isinstance(value, str) and len(value) <= 32:
+        code = re.sub(r'[\s-]', '', value).upper()
+        if _CODE.fullmatch(code):
+            return code
+    raise PatreonRefusal(MALFORMED_CODE, 'malformed_code')
+
+
 def parse_membership(value):
-    """Strict reading of the library ``patreon`` object (PATREON-PROTOCOL v1).
+    """Strict reading of the library ``patreon`` object (PATREON-PROTOCOL v1.1).
 
     ``tier`` and ``valid_until`` are set only while the membership is active.
     ``valid_until`` is Patreon's next charge date: an indication for display,
-    never an expiry the client enforces."""
+    never an expiry the client enforces. ``pending``: an approval on Patreon
+    waits for its code here. ``reason``: ``free_trial`` explains an inactive
+    membership (free trials grant nothing unless the operator allows them)."""
     try:
         if not isinstance(value, dict):
             raise ValueError
         linked, status, tier = value.get('linked'), value.get('status'), value.get('tier')
-        valid_until = value.get('valid_until')
+        valid_until, pending, reason = value.get('valid_until'), value.get('pending'), value.get('reason')
         active = status == 'active'
         if (type(linked) is not bool or status not in STATUSES or (active and (not linked or tier not in TIERS))
-                or (not active and (tier is not None or valid_until is not None))):
+                or (not active and (tier is not None or valid_until is not None))
+                or type(pending) is not bool or reason not in REASONS):
             raise ValueError
         if valid_until is not None:
             _utc(valid_until)
@@ -236,7 +276,7 @@ def parse_membership(value):
     except (ValueError, TypeError):
         raise StoreError('The Patreon membership response is invalid.') from None
     return {'linked': linked, 'status': status, 'tier': tier, 'valid_until': valid_until,
-            'join_url': join, 'request_url': request_url}
+            'join_url': join, 'request_url': request_url, 'pending': pending, 'reason': reason}
 
 
 class PatreonClient(CommerceClient):
@@ -259,7 +299,7 @@ class PatreonClient(CommerceClient):
 
     def unlinked(self):
         return {'linked': False, 'status': 'inactive', 'tier': None, 'valid_until': None,
-                'join_url': self.patreon.join_url, 'request_url': None}
+                'join_url': self.patreon.join_url, 'request_url': None, 'pending': False, 'reason': None}
 
     def library(self):
         credential = self.credential()
@@ -283,6 +323,24 @@ class PatreonClient(CommerceClient):
         if not 0 < remaining <= LINK_LIFETIME_SECONDS + CLOCK_SKEW_SECONDS:
             raise StoreError('The Patreon authorization link has an invalid expiry.')
         return {'authorize_url': url, 'expires_at': value['expires_at']}
+
+    def confirm(self, code):
+        """Finish linking with the code the Patreon page shows (v1.1). Only
+        this installation is linked, whoever approved on Patreon."""
+        code = confirmation_code(code)
+        credential = self.credential()
+        if credential is None:
+            # Connect enrolls this installation; without it nothing can be pending.
+            raise PatreonRefusal(CONFIRM_ERRORS['no_pending_link'], 'no_pending_link')
+        try:
+            value = self._json('POST', '/v1/patreon/confirm', data={'code': code}, credential=credential)
+        except ServiceRefused as exc:
+            if exc.code in CONFIRM_ERRORS:
+                raise PatreonRefusal(CONFIRM_ERRORS[exc.code], exc.code) from None
+            raise
+        if value.get('status') != 'linked':
+            raise StoreError('The Patreon service did not confirm the connection.')
+        return {'status': 'linked'}
 
     def unlink(self):
         credential = self.credential()
@@ -312,6 +370,8 @@ def register_patreon_routes(bp):
             return response
         except StoreNotConfigured as exc:
             return jsonify(status='not_configured', message=str(exc), patreon=None, can_manage=is_admin()), 200
+        except PatreonRefusal as exc:
+            return jsonify(error=str(exc), code=exc.code, status='refused'), 409
         except (StoreError, OSError):
             return jsonify(error='Patreon could not be reached or refused the request. Installed plugins '
                                  'and this version of LDS keep working.', status='unavailable', patreon=None), 409
@@ -335,6 +395,15 @@ def register_patreon_routes(bp):
             empty_body()
             return changed(client.link())
         return invoke(link)
+
+    @bp.post('/patreon/confirm')
+    def patreon_confirm():
+        def confirm(client):
+            value = request.get_json(silent=True)
+            if not isinstance(value, dict) or set(value) != {'code'}:
+                raise StoreError('The Patreon request is invalid.')
+            return changed(client.confirm(value['code']))
+        return invoke(confirm)
 
     @bp.post('/patreon/unlink')
     def patreon_unlink():

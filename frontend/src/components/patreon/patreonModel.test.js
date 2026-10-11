@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
-  PATREON_ACCESS_SUMMARY, isPatreonRelease, membershipLabel, patreonActions,
+  FREE_TRIAL_TEXT, PATREON_ACCESS_SUMMARY, isPatreonRelease, membershipLabel, patreonActions,
   safeAuthorizeUrl, safeJoinUrl, safeRequestUrl, tierLabel,
 } from './patreonModel.js';
 
@@ -26,7 +26,7 @@ test('only the pinned Patreon authorization page becomes a link', () => {
 });
 
 test('actions follow the membership: connect, join, disconnect, custom requests', () => {
-  const none = { connect: false, reconnect: false, join: false, disconnect: false, request: false };
+  const none = { connect: false, reconnect: false, join: false, disconnect: false, request: false, confirm: false };
   assert.deepEqual(patreonActions({ status: 'not_connected', patreon: { linked: false, status: 'inactive',
     tier: null, join_url: JOIN, request_url: null } }), { ...none, connect: true, join: true });
   assert.deepEqual(patreonActions(linked()), { ...none, disconnect: true });
@@ -38,6 +38,19 @@ test('actions follow the membership: connect, join, disconnect, custom requests'
   for (const status of ['not_configured', 'unavailable', 'not_permitted']) {
     assert.deepEqual(patreonActions({ status, patreon: null }), none);
   }
+});
+
+test('a pending approval asks for the code, and a free trial says when access starts', () => {
+  const pending = { status: 'not_connected', patreon: { linked: false, status: 'inactive', tier: null,
+    join_url: JOIN, request_url: null, pending: true, reason: null } };
+  assert.equal(patreonActions(pending).confirm, true);
+  assert.match(membershipLabel(pending), /Enter the code shown on the Patreon page/);
+  assert.equal(patreonActions(linked()).confirm, false);
+  const trial = linked({ status: 'inactive', tier: null, reason: 'free_trial' });
+  assert.equal(membershipLabel(trial), FREE_TRIAL_TEXT);
+  assert.match(FREE_TRIAL_TEXT, /Access starts with your first payment on Patreon/);
+  // An operator who allows free trials sees them as active: no warning then.
+  assert.match(membershipLabel(linked({ reason: 'free_trial' })), /^Active Patreon membership/);
 });
 
 test('labels name the tiers and never carry a price', () => {

@@ -37,6 +37,22 @@ test('membership actions render in every state', () => {
   assert.match(pending, /href="https:\/\/www\.patreon\.com\/oauth2\/authorize\?state=x"[^>]*>Continue on Patreon/)
 })
 
+test('the code of the Patreon page is asked after Continue on Patreon and while an approval waits', () => {
+  const field = /Enter the code shown on the Patreon page[\s\S]*<input[^>]*>[\s\S]*>Confirm</
+  assert.doesNotMatch(render(PatreonAccessActions, { state: state(UNLINKED) }), /Enter the code shown/)
+  assert.match(render(PatreonAccessActions, {
+    state: state(UNLINKED, { authorizeUrl: 'https://www.patreon.com/oauth2/authorize?state=x' }) }), field)
+  // Back later, or after a reload: the approval still waits for its code.
+  const waiting = { ...UNLINKED, patreon: { ...UNLINKED.patreon, pending: true } }
+  assert.match(render(PatreonAccessActions, { state: state(waiting) }), field)
+  const refused = render(PatreonAccessActions, { state: state(waiting, { error: 'This code has expired.' }) })
+  assert.match(refused, /role="alert"[^>]*>This code has expired\./)
+  // The Updates block shares these actions: the field appears there too.
+  const updates = render(PatreonUpdates, { patreon: { status: 'ready', update_available: true, install_mode: 'git',
+    release: { version: '2026.10.20' }, can_apply: false, entitled: false, access: waiting } })
+  assert.match(updates, field)
+})
+
 test('the Patreon block of the Updates card renders each channel state', () => {
   const ready = { status: 'ready', update_available: true, install_mode: 'git',
     release: { version: '2026.10.20', notes: ['Members feature'] } }

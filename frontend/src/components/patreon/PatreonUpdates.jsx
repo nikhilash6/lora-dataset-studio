@@ -7,10 +7,16 @@ import { PATREON_ACCESS_SUMMARY, membershipLabel } from './patreonModel'
    Connect / Join, and leave the installed version alone. */
 function PatreonJoin({ access, onChanged }) {
   const state = usePatreonAccess('', access)
+  // A refresh or a confirmed code can make the update available: re-read the channel.
+  const confirm = async (code) => {
+    const done = await state.confirm(code)
+    if (done) onChanged?.()
+    return done
+  }
   return (
     <div className="space-y-2">
       <p className="text-xs text-content-muted">{state.access ? membershipLabel(state.access) : 'Checking Patreon…'}</p>
-      <PatreonAccessActions state={{ ...state, load: async () => { await state.load(); onChanged?.() } }} compact />
+      <PatreonAccessActions state={{ ...state, confirm, load: async () => { await state.load(); onChanged?.() } }} compact />
     </div>
   )
 }

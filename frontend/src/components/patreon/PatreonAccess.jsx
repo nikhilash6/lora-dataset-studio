@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ExternalLink, RefreshCw } from 'lucide-react';
 import { apiFetch, postJson } from '../../api/fetchClient.js';
 import {
-  JUST_JOINED_HINT, PATREON_ACCESS_SUMMARY, PATREON_PRO_SUMMARY, membershipLabel, patreonActions,
+  CODE_PROMPT, JUST_JOINED_HINT, PATREON_ACCESS_SUMMARY, PATREON_PRO_SUMMARY, membershipLabel, patreonActions,
   safeAuthorizeUrl, safeJoinUrl, safeRequestUrl,
 } from './patreonModel.js';
 
@@ -37,10 +37,10 @@ export function usePatreonAccess(adminToken = '', initial = null) {
     return () => controller.abort();
   }, [load]);
 
-  const post = async (path) => {
+  const post = async (path, body = {}) => {
     setBusy(true); setError('');
     try {
-      return await postJson(`${ENDPOINT}/${path}`, {}, { headers });
+      return await postJson(`${ENDPOINT}/${path}`, body, { headers });
     } catch (failure) {
       setError(failure?.message || 'Patreon could not be reached. Installed plugins and this version of LDS keep working.');
       return null;
@@ -61,17 +61,47 @@ export function usePatreonAccess(adminToken = '', initial = null) {
     if (await post('unlink')) { setAuthorizeUrl(''); await load(); }
   };
 
-  return { access, busy, error, authorizeUrl, load, connect, disconnect };
+  // The server names each refusal (wrong or expired code, too many attempts…).
+  const confirm = async (code) => {
+    if (!(await post('confirm', { code }))) return false;
+    setAuthorizeUrl('');
+    await load();
+    return true;
+  };
+
+  return { access, busy, error, authorizeUrl, load, connect, disconnect, confirm };
+}
+
+/* Approving on Patreon links nothing by itself (protocol v1.1): the Patreon
+   page shows a code, typed here, so only this installation is linked. */
+function ConfirmCode({ busy, disabled, onConfirm }) {
+  const [code, setCode] = useState('');
+  const submit = async (event) => {
+    event.preventDefault();
+    if (await onConfirm?.(code)) setCode('');
+  };
+  return <form className="flex flex-wrap items-end gap-2" onSubmit={submit} data-patreon-code>
+    <label className="flex min-w-0 flex-col gap-1 text-sm">
+      <span>{CODE_PROMPT}</span>
+      <input type="text" value={code} onChange={(event) => setCode(event.target.value)} maxLength={32}
+        autoComplete="off" autoCapitalize="characters" spellCheck={false} placeholder="XXXX-XXXX"
+        className="min-h-10 w-44 rounded-md border border-border bg-surface px-3 py-2 font-mono uppercase tracking-widest" />
+    </label>
+    <button type="submit" className={BTN} disabled={busy || disabled || !code.trim()}>
+      {busy ? 'Confirming…' : 'Confirm'}
+    </button>
+  </form>;
 }
 
 /* Connect / Join / Disconnect / Request a custom plugin, plus the one-time
-   "Continue on Patreon" link. No request leaves the app on mount, and opening
-   Patreon is always a plain link the user clicks. */
+   "Continue on Patreon" link and the code it leads to. No request leaves the
+   app on mount, and opening Patreon is always a plain link the user clicks. */
 export function PatreonAccessActions({ state, compact = false }) {
-  const { access, busy, error, authorizeUrl, load, connect, disconnect } = state;
+  const { access, busy, error, authorizeUrl, load, connect, disconnect, confirm } = state;
   const actions = patreonActions(access);
   const patreon = access?.patreon;
   const canManage = access?.can_manage !== false;
+  const askCode = Boolean(authorizeUrl) || actions.confirm;
   return <div className="space-y-2" data-patreon-actions>
     <div className="flex flex-wrap items-center gap-2">
       {actions.connect && <button type="button" className={BTN} disabled={busy || !canManage} onClick={connect}>
@@ -95,8 +125,9 @@ export function PatreonAccessActions({ state, compact = false }) {
       <a href={authorizeUrl} target="_blank" rel="noopener noreferrer" className={PRIMARY}>
         Continue on Patreon<ExternalLink className="h-4 w-4" aria-hidden="true" />
       </a>
-      <p className="text-xs text-content-muted">Approve LDS on Patreon, then come back and press Refresh. This link expires after a few minutes.</p>
+      <p className="text-xs text-content-muted">Approve LDS on Patreon, then type the code shown there below. This link expires after a few minutes.</p>
     </div>}
+    {askCode && <ConfirmCode busy={busy} disabled={!canManage} onConfirm={confirm} />}
     {error && <p role="alert" className="text-sm text-amber-500">{error}</p>}
   </div>;
 }

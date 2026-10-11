@@ -6,9 +6,17 @@ keep working when a membership ends; new downloads and updates need an active
 membership. LDS Pro adds custom plugin requests, handled outside the app.
 
 The app never sees Patreon credentials. **Connect Patreon** asks the operator's
-service for a one-time authorization link on `www.patreon.com`; the browser
-approves it there and the service records the link. Only the service's library
-answer counts as membership, and the service checks it again for every download.
+service for a one-time authorization link on `www.patreon.com`. After you
+approve LDS there, the Patreon page shows a code (`XXXX-XXXX`): type it in the
+Patreon card of LDS and press **Confirm**. Approving alone links nothing, so an
+approval link sent by someone else cannot attach their installation to your
+membership. The code expires after 10 minutes and allows five attempts; press
+Connect Patreon again for a new one. A membership can connect a limited number
+of new installations per 30 days.
+
+Only the service's library answer counts as membership, and the service checks
+it again for every download. A Patreon free trial does not include LDS access:
+access starts with the first payment on Patreon.
 
 ## Shipped configuration
 

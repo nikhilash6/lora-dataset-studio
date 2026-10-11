@@ -13,6 +13,14 @@ export const PATREON_PRO_SUMMARY = 'LDS Pro members can also request custom plug
 // the creator's webhook, or by connecting again.
 export const JUST_JOINED_HINT = 'Just joined? Press Connect Patreon again if your membership does not appear.';
 
+// Protocol v1.1: approving on Patreon links nothing until the code shown on the
+// Patreon page is typed here, so the person who approved cannot link someone
+// else's installation.
+export const CODE_PROMPT = 'Enter the code shown on the Patreon page';
+
+export const FREE_TRIAL_TEXT = 'Patreon free trials do not include LDS access. '
+  + 'Access starts with your first payment on Patreon.';
+
 const TIERS = Object.freeze({ member: 'LDS Member', pro: 'LDS Pro' });
 
 export function tierLabel(tier) {
@@ -54,8 +62,10 @@ export function membershipLabel(access) {
     return 'Patreon membership is managed from this computer, or with the plugin admin token.';
   }
   if (!patreon) return 'Patreon could not be reached. Installed plugins and this version of LDS keep working.';
-  if (!patreon.linked) return 'Patreon is not connected to this installation.';
   if (patreon.status === 'active') return `Active Patreon membership${tierLabel(patreon.tier) ? ` · ${tierLabel(patreon.tier)}` : ''}`;
+  if (patreon.reason === 'free_trial') return FREE_TRIAL_TEXT;
+  if (patreon.pending === true) return `Approved on Patreon. ${CODE_PROMPT} to finish connecting.`;
+  if (!patreon.linked) return 'Patreon is not connected to this installation.';
   if (patreon.status === 'verification_required') {
     return 'Patreon could not confirm your membership recently. Press Refresh; reconnect Patreon if this persists.';
   }
@@ -63,7 +73,8 @@ export function membershipLabel(access) {
 }
 
 /* Which actions to offer. Connect (again) and Join while not an active member,
-   Disconnect while linked, custom requests for active Pro members. */
+   Disconnect while linked, custom requests for active Pro members, and the
+   code field while an approval on Patreon waits for it. */
 export function patreonActions(access) {
   const patreon = access?.patreon;
   const ready = Boolean(patreon) && access?.status !== 'not_configured' && access?.status !== 'unavailable';
@@ -75,6 +86,7 @@ export function patreonActions(access) {
     join: ready && !active && Boolean(safeJoinUrl(patreon.join_url)),
     disconnect: linked,
     request: active && patreon.tier === 'pro' && Boolean(safeRequestUrl(patreon.request_url)),
+    confirm: ready && patreon.pending === true,
   };
 }
 

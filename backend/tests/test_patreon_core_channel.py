@@ -47,7 +47,7 @@ BUNDLE = f'core/lds-core-{VERSION}.bundle'
 ARCHIVE = f'core/lds-core-{VERSION}.zip'
 SOURCE = f'core/lds-core-{VERSION}.source.zip'
 ACTIVE = {'linked': True, 'status': 'active', 'tier': 'member', 'valid_until': None,
-          'join_url': 'https://www.patreon.com/c/example', 'request_url': None}
+          'join_url': 'https://www.patreon.com/c/example', 'request_url': None, 'pending': False, 'reason': None}
 
 
 @pytest.fixture(autouse=True)
