@@ -231,12 +231,22 @@ def test_link_refuses_any_other_authorization_address(remote, url):
         client.link()
 
 
-@pytest.mark.parametrize('seconds', [-5, 3600])
-def test_link_expiry_must_be_short_and_in_the_future(remote, seconds):
+@pytest.mark.parametrize('seconds,accepted', [
+    (600, True), (-5, True),
+    (600 + 15 * 60, True),     # this computer's clock 15 minutes behind
+    (600 + 2 * 3600, True),    # a clock left on another time zone, behind...
+    (600 - 3 * 3600, True),    # ...or ahead
+    (3 * 86400, False), (-3 * 86400, False)])
+def test_link_expiry_is_informative_and_tolerates_a_skewed_clock(remote, seconds, accepted):
+    """`expires_at` only informs: a local clock that lags must not refuse the link."""
     client = connected(remote)
-    remote[0].append(link_reply('https://www.patreon.com/oauth2/authorize?state=y', seconds))
-    with pytest.raises(StoreError):
-        client.link()
+    url = 'https://www.patreon.com/oauth2/authorize?state=y'
+    remote[0].append(link_reply(url, seconds))
+    if accepted:
+        assert client.link()['authorize_url'] == url
+    else:
+        with pytest.raises(StoreError):
+            client.link()
 
 
 def test_library_never_enrolls_and_unlink_without_link_needs_no_network(remote):

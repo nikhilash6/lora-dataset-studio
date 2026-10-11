@@ -37,7 +37,10 @@ AUTHORIZE_PREFIX = 'https://www.patreon.com/oauth2/authorize?'
 MAX_CONFIG_BYTES = 256 * 1024
 MAX_ROOT_BYTES = 512000
 LINK_LIFETIME_SECONDS = 600
-CLOCK_SKEW_SECONDS = 60
+# `expires_at` of an authorization link only informs: the service enforces it.
+# A local clock that lags or leads, up to a day (a time zone left wrong), must
+# not refuse the link; a date further off still reads as a broken answer.
+CLOCK_SKEW_SECONDS = 24 * 3600
 STATUSES = frozenset({'active', 'inactive', 'verification_required'})
 TIERS = frozenset({'member', 'pro'})
 REASONS = (None, 'free_trial')
@@ -320,7 +323,7 @@ class PatreonClient(CommerceClient):
         except ValueError:
             raise StoreError('The Patreon authorization address is invalid.') from None
         remaining = (_utc(value.get('expires_at')) - datetime.now(timezone.utc)).total_seconds()
-        if not 0 < remaining <= LINK_LIFETIME_SECONDS + CLOCK_SKEW_SECONDS:
+        if not -CLOCK_SKEW_SECONDS < remaining <= LINK_LIFETIME_SECONDS + CLOCK_SKEW_SECONDS:
             raise StoreError('The Patreon authorization link has an invalid expiry.')
         return {'authorize_url': url, 'expires_at': value['expires_at']}
 
