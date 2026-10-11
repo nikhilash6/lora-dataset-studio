@@ -51,6 +51,7 @@ import { versionLabel } from './utils/versionLabel'
 import { useTrainingActivity } from './hooks/useTrainingActivity'
 import { activityLabel } from './utils/trainingActivity'
 import { installMode } from './components/settings/updateStatus'
+import { waitForRelaunchedServer } from './utils/serverRestart'
 import { UsageStatisticsProvider } from './usage/UsageStatisticsContext'
 import UsageStatisticsBanner from './usage/UsageStatisticsBanner'
 
@@ -374,17 +375,11 @@ function UpdateBanner() {
     return () => window.removeEventListener('lds:update-available', onFound)
   }, [])
 
-  // Poll /api/health until the re-execed server answers, then hard-reload so the
-  // new frontend/dist loads. Mirrors the Settings "Updates" card.
+  // Wait for the re-execed server (not the old process still answering), then
+  // hard-reload so the new frontend/dist loads. Mirrors the Settings "Updates" card.
   const waitForHealthAndReload = async () => {
-    for (let i = 0; i < 120; i += 1) {
-      await new Promise((r) => setTimeout(r, 1000))
-      try {
-        const res = await fetch('/api/health', { cache: 'no-store' })
-        if (res.ok) { window.location.reload(); return }
-      } catch { /* still restarting — keep waiting */ }
-    }
-    setApplying(false); setPhase('')          // gave up after ~2 min
+    if (await waitForRelaunchedServer()) { window.location.reload(); return }
+    setApplying(false); setPhase('')          // gave up after 15 min
   }
 
   // One-click pull + restart, same backend action as the Settings card. A packaged

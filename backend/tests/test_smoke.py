@@ -1,2 +1,3 @@
 def test_health(client):
-    assert client.get('/api/health').get_json() == {'ok': True}
+    body = client.get('/api/health').get_json()
+    assert body['ok'] is True and isinstance(body['boot'], str)

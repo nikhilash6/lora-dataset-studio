@@ -7,6 +7,7 @@ import { installMode, zipUpdateHeadline, progressLabel, progressPercent } from '
 import PatreonUpdates from '../patreon/PatreonUpdates'
 import { Card } from './primitives'
 import { versionLabel } from '../../utils/versionLabel'
+import { waitForRelaunchedServer } from '../../utils/serverRestart'
 import UsageStatisticsCard from './UsageStatisticsCard'
 
 /* In-app updater: "Check for updates" hits the git-aware check (commits-behind for a
@@ -59,28 +60,10 @@ function UpdatesCard() {
   }
 
   const waitForHealthAndReload = async () => {
-    // The server is re-execing: /api/health refuses connections for a few seconds,
-    // then answers again on the same port. The OLD process keeps answering until it
-    // exits (the restart waits ~1 s for the response to flush): reloading on its "ok"
-    // landed the page on a dying server, stuck on "Network error". Reload only once a
-    // new process answers (another boot id) or after the server was seen down.
-    let before = null
-    let sawDown = false
-    try {
-      const first = await fetch('/api/health', { cache: 'no-store' })
-      if (first.ok) before = (await first.json()).boot || null
-      else sawDown = true
-    } catch { sawDown = true }
-    for (let i = 0; i < 120; i += 1) {
-      await new Promise((r) => setTimeout(r, 1000))
-      try {
-        const res = await fetch('/api/health', { cache: 'no-store' })
-        if (!res.ok) { sawDown = true; continue }
-        const boot = (await res.json().catch(() => ({}))).boot || null
-        if (sawDown || !before || (boot && boot !== before)) { window.location.reload(); return }
-      } catch { sawDown = true }              // still down — keep waiting
-    }
-    setApplying(false); setPhase('')          // gave up after ~2 min
+    // Waits for the NEW process (the old one answers until it exits), then
+    // hard-reloads to pull the new dist. Changed dependencies can take minutes.
+    if (await waitForRelaunchedServer()) { window.location.reload(); return }
+    setApplying(false); setPhase('')          // gave up after 15 min
   }
 
   // Packaged (ZIP) installs download+swap the release (with a progress bar); a git
