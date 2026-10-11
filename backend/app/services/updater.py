@@ -22,11 +22,13 @@ unusual setup).
 from __future__ import annotations
 from ..timeout_settings import network_timeout, processing_timeout
 
+import json
 import os
 import re
 import shutil
 import subprocess
 import sys
+import tempfile
 import threading
 from pathlib import Path
 
@@ -149,6 +151,83 @@ def current_sha(root=None):
 PATREON_MARKER_REF = 'refs/lds/patreon/installed'
 PATREON_CHANNEL_REASON = ('This installation follows the Patreon update channel. Install its updates '
                           'from Settings › Maintenance; public changes arrive with the next Patreon release.')
+
+
+# A ZIP or Docker installation has no Git history to carry the channel, so its
+# data folder does: services/patreon_core.py writes this marker before a
+# Patreon archive replaces the code, and the Docker host updater writes it in
+# the lane's data folder (this process reads it as its own data folder). While
+# it exists the public ZIP update refuses unless explicitly forced: a newer
+# public release would replace the Patreon version and remove its changes.
+PATREON_CHANNEL_FILE = 'patreon-channel.json'
+PATREON_CHANNEL_FORMAT = 'lds-patreon-channel/1'
+PATREON_RELEASE_REASON = ('This installation runs a Patreon release of LDS. A public release would replace it '
+                          'and remove the Patreon changes, so it is not installed. Install updates from the '
+                          'Patreon channel in Settings › Maintenance, or choose to install the public release '
+                          'anyway.')
+_CHANNEL_VERSION = re.compile(r'\d{4}\.\d{2}\.\d{2}(?:\.\d+)?\Z')
+
+
+def _patreon_channel_path(data=None) -> Path:
+    from ..config import data_dir
+    return Path(data or data_dir()) / PATREON_CHANNEL_FILE
+
+
+def patreon_channel(data=None):
+    """``{'version', 'commit'}`` of the Patreon release recorded in the data
+    folder, or None. Fails closed: a marker that exists but cannot be read
+    still counts (with unknown values), so damage never unlocks a public update."""
+    try:
+        raw = _patreon_channel_path(data).read_bytes()
+    except FileNotFoundError:
+        return None
+    except OSError:
+        return {'version': None, 'commit': None}
+    try:
+        value = json.loads(raw)
+        version, commit = value['version'], value['commit']
+        if (value.get('format') != PATREON_CHANNEL_FORMAT or not _CHANNEL_VERSION.fullmatch(version)
+                or not re.fullmatch(r'[0-9a-f]{40}', commit)):
+            raise ValueError
+    except (ValueError, TypeError, KeyError, AttributeError, RecursionError):
+        return {'version': None, 'commit': None}
+    return {'version': version, 'commit': commit}
+
+
+def _replace_file(path, data: bytes) -> None:
+    """Complete file or none: temporary file, fsync, rename in the same folder."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    descriptor, temporary = tempfile.mkstemp(prefix='.' + path.name + '-', dir=path.parent)
+    try:
+        with os.fdopen(descriptor, 'wb') as stream:
+            stream.write(data)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, path)
+    finally:
+        Path(temporary).unlink(missing_ok=True)
+
+
+def write_patreon_channel(version, commit, data=None):
+    """Record a Patreon release; returns the previous marker bytes (or None)
+    for :func:`restore_patreon_channel`."""
+    path = _patreon_channel_path(data)
+    try:
+        previous = path.read_bytes()
+    except FileNotFoundError:
+        previous = None
+    record = {'format': PATREON_CHANNEL_FORMAT, 'version': version, 'commit': commit}
+    _replace_file(path, json.dumps(record, indent=2).encode('utf-8') + b'\n')
+    return previous
+
+
+def restore_patreon_channel(previous, data=None) -> None:
+    """Put back the marker :func:`write_patreon_channel` replaced; None removes it."""
+    path = _patreon_channel_path(data)
+    if previous is None:
+        path.unlink(missing_ok=True)
+    else:
+        _replace_file(path, previous)
 
 
 def _is_ancestor(root, ancestor, descendant) -> bool:
@@ -659,15 +738,22 @@ def zip_update_in_progress() -> bool:
         return _zip_state.get('phase') in _ACTIVE_PHASES
 
 
-def start_zip_update(root=None) -> dict:
+def start_zip_update(root=None, *, force_public=False) -> dict:
     """Kick off the release-ZIP update on a background thread and return
     immediately so the download doesn't block the request. The trivial outcomes
     (already up to date, no ZIP asset, feed unreachable) are decided synchronously
     and returned inline — no thread, the button handles them like the git path.
     A real update returns {ok, async:True, from, to, total}; the client then polls
-    :func:`zip_update_progress`. On success the worker schedules the restart."""
+    :func:`zip_update_progress`. On success the worker schedules the restart.
+
+    An installation on the Patreon channel (:func:`patreon_channel`) refuses
+    unless ``force_public``; a forced public release then removes the marker
+    once its files are in place."""
     root = Path(root or REPO_ROOT)
     from ..version import APP_VERSION
+    on_patreon = patreon_channel() is not None
+    if on_patreon and not force_public:
+        return {'ok': False, 'channel': 'patreon', 'can_force': True, 'reason': PATREON_RELEASE_REASON}
     rel = latest_release()
     if rel.get('reason'):
         return {'ok': False, 'reason': rel['reason']}
@@ -692,7 +778,8 @@ def start_zip_update(root=None) -> dict:
                           total=rel.get('zip_size') or 0,
                           **{'from': APP_VERSION, 'to': latest})
     try:
-        threading.Thread(target=_run_zip_update, args=(root, rel), daemon=True).start()
+        threading.Thread(target=_run_zip_update, args=(root, rel),
+                         kwargs={'leave_patreon': on_patreon}, daemon=True).start()
     except Exception as exc:
         # Reserving the lifecycle happens before starting the worker so two
         # requests cannot launch competing swaps.  If the runtime cannot start
@@ -709,13 +796,15 @@ def start_zip_update(root=None) -> dict:
             'total': rel.get('zip_size') or 0}
 
 
-def start_verified_zip_update(root, rel, *, download, reserve) -> dict:
+def start_verified_zip_update(root, rel, *, download, reserve, channel=None) -> dict:
     """Async ZIP update whose bytes come from `download` (the Patreon channel).
 
     Same progress state, file swap, backup and restart as the public ZIP path.
     `reserve()` runs in the worker right before the swap and must return the
     idle gate it froze (plugins/restart.py); the worker keeps that gate until
-    the process exits, or releases it when nothing was installed."""
+    the process exits, or releases it when nothing was installed. `channel`
+    (``{'version', 'commit'}``) is recorded as the Patreon channel marker right
+    before the first file moves, and put back as it was if nothing installs."""
     root = Path(root or REPO_ROOT)
     from ..version import APP_VERSION
     with _zip_lock:
@@ -729,7 +818,8 @@ def start_verified_zip_update(root, rel, *, download, reserve) -> dict:
                           **{'from': APP_VERSION, 'to': rel['version']})
     try:
         threading.Thread(target=_run_zip_update, args=(root, rel),
-                         kwargs={'download': download, 'reserve': reserve}, daemon=True).start()
+                         kwargs={'download': download, 'reserve': reserve, 'channel': channel},
+                         daemon=True).start()
     except Exception as exc:
         reason = f'The update worker could not start: {exc}'
         with _zip_lock:
@@ -740,11 +830,17 @@ def start_verified_zip_update(root, rel, *, download, reserve) -> dict:
             'total': rel.get('zip_size') or 0}
 
 
-def _run_zip_update(root, rel, *, download=None, reserve=None) -> None:
+def _run_zip_update(root, rel, *, download=None, reserve=None, channel=None,
+                    leave_patreon=False) -> None:
     """Worker body: run the update, mirror its phase into `_zip_state`, and on
     success schedule the restart. Apply failures land as phase ``error`` after
     their rollback; a later restart-scheduling failure instead records that the
-    new files are installed and still require a manual restart."""
+    new files are installed and still require a manual restart.
+
+    `channel`: Patreon marker written before the first file moves, as the Git
+    channel moves its ref before HEAD, and restored when nothing installed.
+    `leave_patreon`: a forced public release removes the marker once installed.
+    Both fail closed: a marker that cannot be restored or removed stays."""
     def cb(phase, done=0, total=0):
         with _zip_lock:
             _zip_state['phase'] = phase
@@ -752,15 +848,26 @@ def _run_zip_update(root, rel, *, download=None, reserve=None) -> None:
                 _zip_state['total'] = total
             if done:
                 _zip_state['downloaded'] = done
-    held = []
+    held, previous = [], []
 
     def before_install():
-        held.append(reserve())
+        if reserve is not None:
+            held.append(reserve())
+        if channel is not None:
+            previous.append(write_patreon_channel(channel['version'], channel['commit']))
 
-    res = apply_zip_update(root, release=rel, on_progress=cb, download=download,
-                           before_install=before_install if reserve is not None else None)
+    hook = before_install if reserve is not None or channel is not None else None
+    res = apply_zip_update(root, release=rel, on_progress=cb, download=download, before_install=hook)
+    installed = bool(res.get('ok') and res.get('changed'))
+    try:
+        if previous and not installed:
+            restore_patreon_channel(previous[0])
+        elif installed and leave_patreon:
+            restore_patreon_channel(None)
+    except OSError:
+        pass
     gate = held[0] if held else None
-    if gate is not None and not (res.get('ok') and res.get('changed')):
+    if gate is not None and not installed:
         gate.release()  # Same thread as reserve(): nothing was installed.
         gate = None
     with _zip_lock:

@@ -683,7 +683,10 @@ def test_zip_install_swaps_only_the_verified_archive(repos, service, app, gates,
         assert progress['phase'] == 'error' and 'download failed' in progress['error']
         assert version == "APP_VERSION = 'old'\n" and restarts == []
         assert len(gates) == 1 and gates[0].released  # Only the pre-download idle check ran.
+        assert updater.patreon_channel() is None
     else:
+        # The data folder records the channel: no Git history carries it here.
+        assert updater.patreon_channel() == {'version': VERSION, 'commit': repos.release}
         assert progress['phase'] == 'restarting', progress
         assert version == f"APP_VERSION = '{VERSION}'\n"
         assert (root / 'frontend/dist/index.html').read_text(encoding='utf-8') == 'new ui\n'
@@ -692,3 +695,79 @@ def test_zip_install_swaps_only_the_verified_archive(repos, service, app, gates,
         assert restarts == [{'install_requirements': False}]
         assert gates[0].released and not gates[1].released  # Held from the swap until exit.
         assert gates[1].thread != threading.get_ident()  # Reserved by the worker that swaps.
+
+
+# --- ZIP and Docker: the channel marker keeps public releases off ------------
+
+def test_a_public_release_never_replaces_a_patreon_zip_installation(tmp_path, monkeypatch):
+    """After a Patreon ZIP install the public in-app update refuses and names the
+    Patreon channel. Installing the public release takes an explicit force; once
+    it is installed the marker goes, and a failed attempt keeps it."""
+    monkeypatch.setenv('LDS_DATA_DIR', str(tmp_path / 'data'))
+    monkeypatch.setattr(updater.os, 'chdir', lambda path: None)
+    monkeypatch.setattr(updater, 'schedule_restart', lambda **kw: True)
+    root = tmp_path / 'packaged'
+    _packaged_install(root)
+    updater.write_patreon_channel(VERSION, 'a' * 40)
+    monkeypatch.setattr(updater, 'latest_release', lambda *a, **k: pytest.fail('a refusal needs no network'))
+    refused = updater.start_zip_update(root)
+    assert refused['ok'] is False and refused['channel'] == 'patreon' and refused['can_force'] is True
+    assert 'Patreon channel' in refused['reason']
+    assert updater.zip_update_progress()['phase'] == 'idle'
+
+    archive = tmp_path / 'public.zip'
+    _release_zip(archive)
+    monkeypatch.setattr(updater, 'latest_release', lambda *a, **k: {
+        'version': '2099.01.03', 'tag': 'v2099.01.03', 'zip_url': 'https://example.invalid/public.zip',
+        'zip_size': archive.stat().st_size})
+
+    def offline(url, dest, **kwargs):
+        raise OSError('offline')
+    monkeypatch.setattr(updater, '_download_file', offline)
+    assert updater.start_zip_update(root, force_public=True)['async'] is True
+    assert _wait_for_worker()['phase'] == 'error'
+    assert updater.patreon_channel() == {'version': VERSION, 'commit': 'a' * 40}
+
+    monkeypatch.setattr(updater, '_download_file', lambda url, dest, **kwargs: shutil.copyfile(archive, dest))
+    assert updater.start_zip_update(root, force_public=True)['async'] is True
+    assert _wait_for_worker()['phase'] == 'restarting'
+    assert updater.patreon_channel() is None
+
+
+class _Release:
+    status_code = 200
+
+    def json(self):
+        return {'tag_name': 'v2099.12.31', 'html_url': 'https://example.invalid/releases/v2099.12.31',
+                'assets': [{'name': 'LoRA-Dataset-Studio-windows.zip', 'size': 9,
+                            'browser_download_url': 'https://example.invalid/windows.zip'}]}
+
+
+@pytest.mark.parametrize('runtime', ['', 'docker-gpu'])
+def test_public_update_check_offers_no_public_release_to_a_patreon_installation(client, monkeypatch, runtime):
+    """The banner and the Updates card read this check: a ZIP or Docker install
+    on the Patreon channel is told about the public release, never offered it."""
+    import requests
+    from app.routes import settings as routes
+    if runtime:
+        monkeypatch.setenv('LDS_RUNTIME', runtime)
+    monkeypatch.setattr(updater, 'is_git_checkout', lambda root=None: False)
+    monkeypatch.setattr(requests, 'get', lambda *a, **k: _Release())
+    routes._update_cache.update(ts=0.0, data=None)
+    assert client.get('/api/update/check?force=1').json['update_available'] is True
+    updater.write_patreon_channel(VERSION, 'a' * 40)
+    status = client.get('/api/update/check').json
+    assert status['update_available'] is False and status['channel'] == 'patreon'
+    assert status['public_update_available'] is True and status['latest'] == '2099.12.31'
+    assert status.get('can_force', False) is (not runtime)
+    routes._update_cache.update(ts=0.0, data=None)
+
+
+def test_update_route_forwards_only_an_explicit_force(client, monkeypatch):
+    calls = []
+    monkeypatch.setattr(updater, 'is_git_checkout', lambda root=None: False)
+    monkeypatch.setattr(updater, 'start_zip_update', lambda **kwargs: calls.append(kwargs) or {'ok': False})
+    client.post('/api/update/apply', json={})
+    client.post('/api/update/apply', json={'force_public': 'yes'})
+    client.post('/api/update/apply', json={'force_public': True})
+    assert calls == [{}, {}, {'force_public': True}]

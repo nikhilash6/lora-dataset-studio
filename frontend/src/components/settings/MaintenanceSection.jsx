@@ -3,7 +3,9 @@ import { apiFetch, postJson } from '../../api/fetchClient'
 import DiagnosticReport from '../common/DiagnosticReport'
 import DockerUpdateInstructions from '../common/DockerUpdateInstructions'
 import PinokioUpdateInstructions from '../common/PinokioUpdateInstructions'
-import { installMode, patreonCheckFailure, zipUpdateHeadline, progressLabel, progressPercent } from './updateStatus'
+import {
+  installMode, patreonCheckFailure, publicReleaseNotice, zipUpdateHeadline, progressLabel, progressPercent,
+} from './updateStatus'
 import PatreonUpdates from '../patreon/PatreonUpdates'
 import { Card } from './primitives'
 import { versionLabel } from '../../utils/versionLabel'
@@ -96,7 +98,7 @@ function UpdatesCard() {
     setApplying(false); setPhase(''); setProgress(null)   // gave up
   }
 
-  const apply = async () => {
+  const apply = async ({ forcePublic = false } = {}) => {
     // Defense in depth: Docker owns /app as image content. The button is not
     // rendered in this mode, and a stale callback must not POST an apply anyway.
     if (mode === 'docker') return
@@ -105,7 +107,8 @@ function UpdatesCard() {
     if (mode === 'pinokio') return
     setApplying(true); setPhase('pulling'); setProgress(null)
     try {
-      const res = await postJson('/api/update/apply', {})
+      // force_public: a ZIP install on the Patreon channel leaves it on purpose.
+      const res = await postJson('/api/update/apply', forcePublic ? { force_public: true } : {})
       if (res.restarting) {                   // git path: synchronous restart
         setPhase('restarting')
         waitForHealthAndReload()              // not awaited: UI shows "restarting…"
@@ -152,6 +155,14 @@ function UpdatesCard() {
   const dockerMode = mode === 'docker'
   const pinokioMode = mode === 'pinokio'
   const canPull = s && s.update_available && (mode === 'git' || mode === 'zip')
+  // A Patreon ZIP or Docker install is never offered the public release; this
+  // names it and the explicit way back.
+  const notice = publicReleaseNotice(s)
+  const installPublic = () => {
+    if (!window.confirm('Install the public release over this Patreon release? The Patreon changes are '
+      + 'removed; your data and settings are kept, and Patreon updates stay available later.')) return
+    apply({ forcePublic: true })
+  }
   return (
     <Card title="Updates" help={dockerMode
       ? 'Docker installs are updated by pulling the host checkout and rebuilding the image.'
@@ -253,13 +264,30 @@ function UpdatesCard() {
               </a>{' '}and replace the folder.
             </p>
           ) : s.ok ? (
-            <p className="text-emerald-400">
-              {/* A members-only release exists: "up to date" would read as "nothing newer". */}
-              <span aria-hidden>✓</span> {patreon?.update_available ? 'The free version is up to date.' : 'You’re up to date.'}{' '}
-              {/* Name the COMMIT on a git checkout: the release number alone would
-                  claim the last release while the tree may be well past it. */}
-              <span className="text-content-subtle">{versionLabel(s)}</span>
-            </p>
+            <div className="space-y-2">
+              <p className="text-emerald-400">
+                {/* A members-only release exists: "up to date" would read as "nothing newer". */}
+                <span aria-hidden>✓</span> {s.channel === 'patreon' ? 'This installation follows the Patreon channel.'
+                  : patreon?.update_available ? 'The free version is up to date.' : 'You’re up to date.'}{' '}
+                {/* Name the COMMIT on a git checkout: the release number alone would
+                    claim the last release while the tree may be well past it. */}
+                <span className="text-content-subtle">{versionLabel(s)}</span>
+              </p>
+              {notice && (
+                <div className="space-y-1 text-content-muted">
+                  <p>{notice.text}</p>
+                  {notice.canForce && (
+                    <button type="button" onClick={installPublic}
+                      className="rounded-md border border-border-strong px-3 py-1.5 text-sm font-medium text-content hover:bg-surface-raised">
+                      Install the public release instead
+                    </button>
+                  )}
+                  {notice.command && (
+                    <p>To return to public releases, run on the host: <code className="text-content">{notice.command}</code></p>
+                  )}
+                </div>
+              )}
+            </div>
           ) : (
             <p className="text-content-muted"><span aria-hidden>⚠</span> {s.reason || 'Could not check for updates.'}</p>
           )}

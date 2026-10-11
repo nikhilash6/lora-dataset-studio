@@ -101,6 +101,16 @@ update check reports no update and the public updater never resets the
 checkout onto the public branch, even when a public commit shares its tree.
 Pinokio's Update tab tolerates that state instead of failing.
 
+A ZIP or Docker installation has no Git history, so it records the release in
+`patreon-channel.json` in its data folder: `data/` for ZIP, the lane's
+`data-docker-gpu/` or `data-docker/` for Docker. While that file exists, the
+public update check offers no public release, and the public in-app update and
+the `stable`, `v2` and `main` channels of `update-docker.bat` refuse to replace
+the Patreon version, pointing to the Patreon channel instead. To return to
+public releases anyway, choose **Install the public release instead** under
+**Settings → Maintenance** (ZIP) or run `update-docker.bat stable force`
+(Docker); the file goes once the public release is installed.
+
 ### Operator requirements
 
 - Keep the Patreon line fast-forwardable: merge public commits into it rather
@@ -130,7 +140,8 @@ checkout is refused unchanged).
    switch, image rebuild, health check and rollback.
 
 When no newer Patreon release exists, nothing changes. The Docker updater never
-installs an older `APP_VERSION` than the installed one, on any channel, so a
-double-click on `update-docker.bat` cannot take a Patreon installation back to
-an older public release. A release published without a `source` archive stays
-unavailable to Docker; the installed version keeps working.
+installs an older `APP_VERSION` than the installed one, on any channel, and
+after a Patreon install its public channels refuse a newer public release too
+(see the channel marker above), so a double-click on `update-docker.bat` cannot
+replace a Patreon installation. A release published without a `source` archive
+stays unavailable to Docker; the installed version keeps working.

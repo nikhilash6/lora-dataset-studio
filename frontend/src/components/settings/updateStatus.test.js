@@ -16,6 +16,7 @@ import {
   progressLabel,
   patreonCheckFailure,
   patreonUpdateView,
+  publicReleaseNotice,
 } from './updateStatus.js';
 
 test('formatMB is compact and empty for unknown sizes', () => {
@@ -161,4 +162,17 @@ test('the Patreon block is read without administration and says why it cannot in
   assert.match(failed.text, /could not be checked/)
   assert.equal(patreonUpdateView(patreonCheckFailure({ body: { error: 'Patreon is offline.' } })).text,
     'Patreon is offline.')
+})
+
+test('a Patreon ZIP or Docker install hears of a public release without being offered it', () => {
+  assert.equal(publicReleaseNotice({ ok: true, update_available: true, latest: '2026.11.01' }), null)
+  assert.equal(publicReleaseNotice({ ok: true, channel: 'patreon', public_update_available: false }), null)
+  const zip = publicReleaseNotice({ ok: true, channel: 'patreon', update_available: false,
+    public_update_available: true, latest: '2026.11.01', can_force: true })
+  assert.match(zip.text, /Public release v2026\.11\.01/)
+  assert.match(zip.text, /removes the Patreon changes/)
+  assert.deepEqual([zip.canForce, zip.command], [true, null])
+  const docker = publicReleaseNotice({ ok: true, channel: 'patreon', install_mode: 'docker',
+    public_update_available: true, latest: '2026.11.01' })
+  assert.deepEqual([docker.canForce, docker.command], [false, 'update-docker.bat stable force'])
 })

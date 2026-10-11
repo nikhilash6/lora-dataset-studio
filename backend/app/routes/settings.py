@@ -654,6 +654,21 @@ _update_cache = {'ts': 0.0, 'data': None}
 _git_check_cache = {'ts': 0.0, 'data': None}
 
 
+def _patreon_channel_view(out, docker_runtime):
+    """A ZIP or Docker install on the Patreon channel (updater.patreon_channel):
+    the public release is reported, never offered, because installing it would
+    replace the Patreon version (a Git checkout answers through its own ref).
+    Applied after the cache, so a marker written since is never missed."""
+    from ..services import updater
+    if (not docker_runtime and updater.is_git_checkout()) or updater.patreon_channel() is None:
+        return out
+    view = {**out, 'channel': 'patreon', 'update_available': False,
+            'public_update_available': bool(out.get('update_available'))}
+    if not docker_runtime:
+        view['can_force'] = True  # POST /update/apply {"force_public": true}
+    return view
+
+
 @bp.get('/update/check')
 def update_check():
     import time
@@ -684,7 +699,7 @@ def update_check():
     now = time.time()
     if (_update_cache['data'] is not None and (now - _update_cache['ts']) < _UPDATE_TTL
             and not force):
-        return jsonify(_update_cache['data'])
+        return jsonify(_patreon_channel_view(_update_cache['data'], docker_runtime))
     repo = cfg.get('updates.repo') or 'perfectgf/lora-dataset-studio'
     out = {'ok': True, 'current': APP_VERSION, 'latest': None,
            'update_available': False, 'url': f'https://github.com/{repo}/releases'}
@@ -729,7 +744,7 @@ def update_check():
     except requests.RequestException:
         out['reason'] = 'offline or GitHub unreachable'
     _update_cache.update(ts=now, data=out)
-    return jsonify(out)
+    return jsonify(_patreon_channel_view(out, docker_runtime))
 
 
 @bp.post('/update/apply')
@@ -771,8 +786,12 @@ def update_apply():
             _git_check_cache.update(ts=0.0, data=None)
             updater.schedule_restart(install_requirements=bool(res.get('deps_changed')))
         return jsonify(res)
-    # Packaged install: async release update with a progress poll.
+    # Packaged install: async release update with a progress poll. On the
+    # Patreon channel it refuses unless the body says {"force_public": true}.
     _update_cache.update(ts=0.0, data=None)
+    body = request.get_json(silent=True)
+    if isinstance(body, dict) and body.get('force_public') is True:
+        return jsonify(updater.start_zip_update(force_public=True))
     return jsonify(updater.start_zip_update())
 
 

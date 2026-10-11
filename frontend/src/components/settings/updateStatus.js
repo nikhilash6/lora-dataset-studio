@@ -73,6 +73,21 @@ export function installMode(s) {
   return 'unavailable'
 }
 
+/* A ZIP or Docker installation on the Patreon channel (GET /api/update/check
+   reports channel 'patreon'): a newer public release is not offered, since it
+   would replace the Patreon version. Say it exists and name the explicit way
+   back: a button for a ZIP install (can_force), the host command for Docker. */
+export function publicReleaseNotice(s) {
+  if (!s || s.channel !== 'patreon' || !s.public_update_available) return null
+  const release = s.latest ? `Public release v${s.latest}` : 'A newer public release'
+  return {
+    text: `${release} is also available. This installation runs a Patreon release; installing the `
+      + 'public release replaces it and removes the Patreon changes.',
+    canForce: Boolean(s.can_force) && !isDockerInstall(s),
+    command: isDockerInstall(s) ? 'update-docker.bat stable force' : null,
+  }
+}
+
 /* Headline for a ZIP-mode update, e.g. "Update to v2026.07.19 (download ~42 MB)".
    The size hint is omitted when the release didn't report an asset size. */
 export function zipUpdateHeadline(s) {

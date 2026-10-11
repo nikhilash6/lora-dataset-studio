@@ -9,7 +9,9 @@ bytes come through a membership-checked download grant (product ``lds_core``).
   ref, then fast-forward only. Local commits or modified tracked files refuse,
   like ``git pull --ff-only``. Pinokio restarts the app from its own launcher.
 * ZIP install: the verified archive goes through the existing staged swap with
-  its backup and rollback (``updater.apply_zip_update``).
+  its backup and rollback (``updater.apply_zip_update``). The data folder
+  records the channel (``updater.patreon_channel``) so that the public ZIP
+  update refuses to replace this version unless explicitly forced.
 * Docker: never applied from inside the container. The host updater
   (``update-docker.bat patreon``) runs ``fetch-source`` below in a disposable
   container of the current image, checks the result, then applies the release
@@ -230,6 +232,10 @@ def status(root=None, *, force=False):
         if mode in ('git', 'pinokio'):
             marker = updater.patreon_marker(root)
             result['on_channel'] = bool(marker and updater._is_ancestor(root, marker, 'HEAD'))
+        else:
+            # ZIP: written by apply_zip; Docker: by the host updater, in the
+            # lane's data folder that this container mounts as its own.
+            result['on_channel'] = updater.patreon_channel() is not None
         channel = read_channel()
         if channel is not None:
             release = channel.release
@@ -390,8 +396,11 @@ def apply_zip(root, channel):
         return restart.freeze_when_idle(IDLE_ACTION, app=app)
 
     forget_status()
+    # The data folder records the channel before the first file moves, so a
+    # public release never replaces this one silently (updater.patreon_channel).
     return updater.start_verified_zip_update(root, {'version': release.version, 'zip_size': info.length},
-                                             download=download, reserve=reserve)
+                                             download=download, reserve=reserve,
+                                             channel={'version': release.version, 'commit': release.commit})
 
 
 def apply_response(root=None):

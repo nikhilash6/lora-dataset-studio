@@ -316,6 +316,7 @@ def _run_updater(
     required_free_bytes: int = 0,
     docker: Path | None = None,
     extra_env: dict[str, str] | None = None,
+    force_public: bool = False,
 ) -> tuple[subprocess.CompletedProcess[str], list[str], Path]:
     runtime_temp = workspace / "température runner !"
     runtime_temp.mkdir(parents=True, exist_ok=True)
@@ -362,6 +363,8 @@ def _run_updater(
         args += ["-TestRequiredFreeBytes", str(required_free_bytes)]
     if docker is not None:
         args += ["-DockerPath", str(docker)]
+    if force_public:
+        args += ["-ForcePublic"]
     env = os.environ.copy()
     env.pop("LDS_DNS", None)
     env.update(
@@ -1346,6 +1349,7 @@ def test_git_ignored_nonprotected_unicode_path_is_rejected(tmp_path):
 
 INSTALLED = "2026.09.29"
 PATREON = "2026.10.20"
+PATREON_MARKER = "patreon-channel.json"
 
 FAKE_DOCKER = r'''
 import hashlib, json, os, sys
@@ -1400,13 +1404,13 @@ def _patreon_setup(workspace: Path, *, launcher_mode: str | None = None,
 
 
 def _run_patreon(workspace: Path, install: Path, archive: Path, docker: Path, *,
-                 scenario: str = "fetch", version: str = PATREON):
+                 scenario: str = "fetch", version: str = PATREON, **options):
     calls = workspace / "docker calls.jsonl"
     result, launches, runtime_temp = _run_updater(
         workspace, install, channel="patreon", docker=docker, extra_env={
             "LDS_TEST_PYTHON": sys.executable, "LDS_TEST_DOCKER_LOG": str(calls),
             "LDS_TEST_DOCKER_SCENARIO": scenario, "LDS_TEST_DOCKER_ARCHIVE": str(archive),
-            "LDS_TEST_DOCKER_VERSION": version})
+            "LDS_TEST_DOCKER_VERSION": version}, **options)
     recorded = ([json.loads(line) for line in calls.read_text(encoding="utf-8").splitlines()]
                 if calls.exists() else [])
     return result, launches, runtime_temp, recorded
@@ -1427,14 +1431,18 @@ def test_patreon_channel_fetches_in_a_disposable_container_then_applies(tmp_path
     assert launches == ["STUDIO-NEW --update-rebuild" if studio else "LEGACY-NEW --update-rebuild"]
     assert (install / "backend" / "app" / "version.py").read_text() == f"APP_VERSION = '{PATREON}'\n"
     assert (install / "brand-new-code.txt").read_bytes() == b"CREATED BY UPDATE\n"
-    assert _snapshot_named_state(install) == before_state
+    data = install / ("data-docker" if studio else "data-docker-gpu")
+    # The lane's data folder records the channel, so public channels refuse.
+    after_state = _snapshot_named_state(install)
+    marker = json.loads(after_state[data.name].pop(PATREON_MARKER).decode("utf-8"))
+    assert marker == {"format": "lds-patreon-channel/1", "version": PATREON, "commit": "a" * 40}
+    assert after_state == before_state
     _assert_confirmed_rebuild_commits_transaction(install, runtime_temp)
 
     image = "lora-dataset-studio" if studio else "lora-dataset-studio-gpu"
     inspect, run = calls
     assert inspect == ["image", "inspect", "--format", "{{.Id}}", image]
     volumes = [run[index + 1] for index, value in enumerate(run) if value == "--volume"]
-    data = install / ("data-docker" if studio else "data-docker-gpu")
     # Exactly two mounts: data read-only, and a fresh folder of this run only.
     assert len(volumes) == 2 and volumes[0] == f"{data}:/data:ro"
     out = Path(volumes[1][:-len(":/out:rw")])
@@ -1472,6 +1480,7 @@ def test_patreon_channel_applies_nothing_it_cannot_verify(tmp_path, scenario, ve
     assert _snapshot_code(install) == before_code
     _assert_clean_transaction_dirs(install, runtime_temp)
     assert [call[0] for call in calls] == (["image"] if scenario == "no-image" else ["image", "run"])
+    assert not list(install.glob(f"data-docker*/{PATREON_MARKER}"))
 
 
 def test_patreon_channel_up_to_date_changes_nothing(tmp_path):
@@ -1544,3 +1553,106 @@ def test_bat_forwards_patreon_and_reports_an_up_to_date_installation(tmp_path):
     assert "already up to date" in completed.stdout
     assert "Rebuild started" not in completed.stdout
     assert (install / "bat-result.txt").read_text() == "patreon"
+
+
+# --- The channel marker: public channels never replace a Patreon release ----
+
+def _marker_bytes(version: str = PATREON) -> bytes:
+    return json.dumps({"format": "lds-patreon-channel/1", "version": version,
+                       "commit": "b" * 40}).encode("utf-8")
+
+
+@pytest.mark.parametrize("previous", [None, _marker_bytes("2026.10.01")])
+def test_a_rejected_patreon_rebuild_restores_the_channel_marker(tmp_path, previous):
+    install, archive, docker = _patreon_setup(tmp_path)
+    marker = install / "data-docker-gpu" / PATREON_MARKER
+    if previous is not None:
+        _write(marker, previous)
+    before_code = _snapshot_code(install)
+
+    result, launches, runtime_temp, _ = _run_patreon(tmp_path, install, archive, docker, fail_first=True)
+
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "Old code restored" in result.stdout + result.stderr
+    assert launches == ["LEGACY-NEW --update-rebuild", "LEGACY-OLD --update-rebuild"]
+    assert _snapshot_code(install) == before_code
+    assert (marker.read_bytes() if marker.exists() else None) == previous
+
+
+@pytest.mark.parametrize("lane", ["data-docker-gpu", "data-docker"])
+def test_public_channels_refuse_to_replace_a_patreon_installation(tmp_path, lane):
+    """Either lane's data folder counts: both lanes share this code folder."""
+    install = tmp_path / "patreon marker é !"
+    _make_install(install)
+    _write(install / lane / PATREON_MARKER, _marker_bytes())
+    before_code = _snapshot_code(install)
+
+    result, launches, runtime_temp = _run_updater(tmp_path, install, archive=_write_archive(tmp_path))
+
+    assert result.returncode == 1
+    output = result.stdout + result.stderr
+    assert f"LDS v{PATREON} from the Patreon channel" in output
+    assert "update-docker.bat patreon" in output and "update-docker.bat main force" in output
+    assert launches == [] and _snapshot_code(install) == before_code
+    _assert_clean_transaction_dirs(install, runtime_temp)
+
+
+def test_force_installs_the_public_release_and_leaves_the_patreon_channel(tmp_path):
+    install = tmp_path / "patreon force é !"
+    _make_install(install)
+    # A damaged marker still counts; force removes every lane's marker.
+    _write(install / "data-docker-gpu" / PATREON_MARKER, b"{")
+    _write(install / "data-docker" / PATREON_MARKER, _marker_bytes())
+
+    result, launches, runtime_temp = _run_updater(
+        tmp_path, install, archive=_write_archive(tmp_path), force_public=True)
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert launches == ["LEGACY-NEW --update-rebuild"]
+    assert (install / "brand-new-code.txt").read_bytes() == b"CREATED BY UPDATE\n"
+    assert not list(install.glob(f"data-docker*/{PATREON_MARKER}"))
+    _assert_confirmed_rebuild_commits_transaction(install, runtime_temp)
+
+
+def test_force_is_refused_on_the_patreon_channel(tmp_path):
+    install, archive, docker = _patreon_setup(tmp_path)
+
+    result, launches, runtime_temp, calls = _run_patreon(tmp_path, install, archive, docker, force_public=True)
+
+    assert result.returncode == 1
+    assert "applies to the stable, v2 and main channels only" in result.stdout + result.stderr
+    assert launches == [] and calls == []
+
+
+@pytest.mark.skipif(not COMSPEC, reason="cmd.exe is required")
+def test_bat_forwards_force_only_as_the_second_argument(tmp_path):
+    install = tmp_path / "bat force é !"
+    (install / "scripts").mkdir(parents=True)
+    shutil.copy2(GPU_BAT, install / GPU_BAT.name)
+    shutil.copy2(GENERIC_BAT, install / GENERIC_BAT.name)
+    probe = (
+        "param([string]$Channel,[string]$InstallRoot,[switch]$ForcePublic)\n"
+        "[IO.File]::WriteAllText((Join-Path $InstallRoot 'bat-result.txt'), "
+        "($Channel + '|' + $ForcePublic + '|' + (@($args) -join ',')))\n"
+        "exit 0\n"
+    )
+    _write(install / "scripts" / UPDATER.name, probe)
+    result = install / "bat-result.txt"
+
+    def run(*arguments: str) -> subprocess.CompletedProcess[str]:
+        # An inherited variable never forces: only the argument does.
+        env = {**os.environ, "LDS_UPDATE_FORCE": "-ForcePublic"}
+        return subprocess.run(
+            [COMSPEC, "/d", "/c", str(install / GENERIC_BAT.name), *arguments],
+            input="\n", capture_output=True, text=True, errors="replace", env=env,
+            timeout=BAT_TIMEOUT, check=False)
+
+    assert run("stable", "force").returncode == 0
+    assert result.read_text() == "stable|True|"
+    result.unlink()
+    assert run("v2").returncode == 0
+    assert result.read_text() == "v2|False|"
+    result.unlink()
+    refused = run("v2", "forced")
+    assert refused.returncode == 2 and "Too many arguments" in refused.stdout
+    assert not result.exists()

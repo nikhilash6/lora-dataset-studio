@@ -17,6 +17,11 @@
   manifest on its own copy, then uses the same transaction as the other channels.
   No channel installs an older APP_VERSION than the installed one.
 
+  A Patreon install records patreon-channel.json in the lane's data folder.
+  While one exists, STABLE, V2 and MAIN refuse: a public release would replace
+  the Patreon version. -ForcePublic (BAT argument "force") installs the public
+  release anyway and removes the marker once it is installed.
+
   Before changing the installation, the script rejects unsafe ZIP paths,
   symlinks/reparse points, ambiguous archive roots and bundles missing the
   Docker sentinels. A ZIP installation is switched at top-level code boundaries
@@ -38,6 +43,9 @@ param(
     [string]$InstallRoot = '',
 
     [string]$Repository = 'perfectgf/lora-dataset-studio',
+
+    # Public channels only: install the public release over a Patreon one.
+    [switch]$ForcePublic,
 
     # Test-only injection points. They are rejected unless -TestMode is
     # explicit; the public BAT launchers never pass that switch.
@@ -118,6 +126,9 @@ $script:DockerStacks = @{
 $script:PatreonManifestFormat = 'lds-core-source/1'
 $script:PatreonArchiveName = 'lds-core-source.zip'
 $script:PatreonManifestName = 'manifest.json'
+# The channel marker, read by the app too (services/updater.patreon_channel).
+$script:PatreonChannelFile = 'patreon-channel.json'
+$script:PatreonChannelFormat = 'lds-patreon-channel/1'
 $script:UpToDateExitCode = 3
 $script:ExitCode = 0
 
@@ -1686,6 +1697,68 @@ function Invoke-PatreonFetch([string]$Root, [string]$OutDir, [string]$InstalledV
     return (Read-PatreonFetchResult -OutDir $OutDir -InstalledVersion $InstalledVersion)
 }
 
+function Get-PatreonChannelMarkers([string]$Root) {
+    # Every lane's data folder: both lanes run this same code folder, so a
+    # marker left by either one means this code is a Patreon release.
+    $found = @()
+    foreach ($name in @($script:DockerStacks.Keys | Sort-Object)) {
+        $path = Join-Path (Join-Path $Root $script:DockerStacks[$name].Data) $script:PatreonChannelFile
+        if ([IO.File]::Exists($path)) { $found += $path }
+    }
+    return $found
+}
+
+function Read-PatreonChannelVersion([string]$Path) {
+    # Display only: a damaged marker still counts as the Patreon channel.
+    try {
+        $value = [IO.File]::ReadAllText($Path, [Text.Encoding]::UTF8) | ConvertFrom-Json
+        $version = [string]$value.version
+        if ($version -cmatch $script:VersionPattern) { return $version }
+    } catch {
+        return $null
+    }
+    return $null
+}
+
+function Assert-PublicChannelAllowed([string]$Root) {
+    # Returns the markers a forced public install removes once it succeeds.
+    $markers = @(Get-PatreonChannelMarkers $Root)
+    if ($markers.Count -eq 0) { return @() }
+    if ($ForcePublic) {
+        Write-Warning ('This installation runs a Patreon release. Force: the public release replaces it ' +
+            'and removes the Patreon changes.')
+        return $markers
+    }
+    $version = Read-PatreonChannelVersion $markers[0]
+    $installed = if ($version) { "LDS v$version from the Patreon channel" } else { 'a Patreon release of LDS' }
+    throw ("This installation runs $installed. The $Channel channel would replace it with a public " +
+        'release and remove the Patreon changes. No file was changed. Update with: update-docker.bat ' +
+        "patreon. To return to public releases anyway, run: update-docker.bat $Channel force")
+}
+
+function Write-PatreonChannelMarker([string]$Root, $Fetched) {
+    # Written before the code switch and restored if the switch fails, so a
+    # Patreon release is never in place without its marker.
+    $stack = Get-DockerStack $Root
+    $path = Join-Path (Join-Path $Root $stack.Data) $script:PatreonChannelFile
+    $previous = $null
+    if ([IO.File]::Exists($path)) { $previous = [IO.File]::ReadAllBytes($path) }
+    $record = [ordered]@{
+        format = $script:PatreonChannelFormat; version = $Fetched.Version; commit = $Fetched.Commit
+    }
+    Write-DurableUtf8File -Path $path -TempPath ($path + '.tmp') `
+        -Text ((ConvertTo-Json -InputObject $record -Compress) + "`n")
+    return [pscustomobject]@{ Path = $path; Previous = $previous }
+}
+
+function Restore-PatreonChannelMarker($Marker) {
+    if ($null -eq $Marker.Previous) {
+        [IO.File]::Delete($Marker.Path)
+    } else {
+        [IO.File]::WriteAllBytes($Marker.Path, [byte[]]$Marker.Previous)
+    }
+}
+
 function Assert-ArchiveDigest([string]$Path, [string]$Sha256, [long]$Length) {
     $item = Get-Item -LiteralPath $Path -Force
     $stream = [IO.File]::Open($Path, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::Read)
@@ -1732,6 +1805,9 @@ function Invoke-DockerGpuUpdate {
         }
 
         Write-Host "Channel: $Channel" -ForegroundColor Yellow
+        if ($ForcePublic -and $Channel -eq 'patreon') {
+            throw 'Force applies to the stable, v2 and main channels only. No file was changed.'
+        }
         if (Test-Path -LiteralPath (Join-Path $root '.git')) {
             if ($Channel -eq 'patreon') {
                 throw ('Git checkout detected: no Git file was modified. ' +
@@ -1743,6 +1819,12 @@ function Invoke-DockerGpuUpdate {
         }
 
         $installedVersion = Read-AppVersion (Join-Path $root 'backend\app\version.py')
+        # Before any download: a public release never replaces a Patreon one
+        # unless forced, and the forced install then leaves the channel.
+        $publicMarkers = @()
+        if ($Channel -ne 'patreon') {
+            $publicMarkers = @(Assert-PublicChannelAllowed $root)
+        }
         $downloadTemp = New-DownloadTempDirectory
         $fetched = $null
         if ($Channel -eq 'patreon') {
@@ -1793,8 +1875,20 @@ function Invoke-DockerGpuUpdate {
         $validatedItems = @(Get-CodeItems $stagedRoot)
         Assert-LiveDestinationsSafe -Root $root -Items $validatedItems
 
-        Invoke-ZipInstallUpdate -Root $root -StagedRoot $stagedRoot `
-            -SelectedLauncher $LauncherPath -ValidatedItems $validatedItems
+        $channelMarker = $null
+        if ($fetched) {
+            $channelMarker = Write-PatreonChannelMarker -Root $root -Fetched $fetched
+        }
+        try {
+            Invoke-ZipInstallUpdate -Root $root -StagedRoot $stagedRoot `
+                -SelectedLauncher $LauncherPath -ValidatedItems $validatedItems
+        } catch {
+            if ($channelMarker) { Restore-PatreonChannelMarker $channelMarker }
+            throw
+        }
+        foreach ($marker in $publicMarkers) {
+            [IO.File]::Delete($marker)
+        }
     } finally {
         try {
             if ($downloadTemp) { Remove-SafeDownloadTemp $downloadTemp }
@@ -1850,6 +1944,7 @@ function Invoke-SelfBootstrap {
             '-InstallRoot', $root,
             '-Repository', $Repository
         )
+        if ($ForcePublic) { $childArguments += '-ForcePublic' }
         if ($TestMode) {
             $childArguments += '-TestMode'
             if ($ArchivePath) {
