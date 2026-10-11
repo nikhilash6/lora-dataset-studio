@@ -897,7 +897,11 @@ def _run_zip_update(root, rel, *, download=None, reserve=None, channel=None,
         if reserve is not None:
             held.append(reserve())
         if channel is not None:
-            previous.append(write_patreon_channel(channel['version'], channel['commit']))
+            try:
+                previous.append(write_patreon_channel(channel['version'], channel['commit']))
+            except OSError:
+                raise RuntimeError('The Patreon channel could not be recorded in the data folder. '
+                                   'Nothing was changed.') from None
 
     hook = before_install if reserve is not None or channel is not None else None
     res = apply_zip_update(root, release=rel, on_progress=cb, download=download, before_install=hook,

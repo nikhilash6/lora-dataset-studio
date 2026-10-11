@@ -47,11 +47,11 @@ function UpdatesCard() {
       setPatreon(await apiFetch('/api/update/patreon?force=1', { background: true }))
       setPatreonError('')
     } catch (e) {
-      // Keep the last answer and say this check failed; with no answer yet,
-      // the block itself shows the failure.
+      // Keep the last answer and say this check failed; without a real answer
+      // yet, the block itself shows the failure (never twice).
       const failure = patreonCheckFailure(e)
       setPatreon((prev) => prev || failure)
-      setPatreonError(patreon ? failure.message : '')
+      setPatreonError(patreon && patreon.status !== 'unavailable' ? failure.message : '')
     }
   }
 
