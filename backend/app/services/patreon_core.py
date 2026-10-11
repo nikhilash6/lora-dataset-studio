@@ -13,13 +13,15 @@ bytes come through a membership-checked download grant (product ``lds_core``).
   records the channel (``updater.patreon_channel``) so that the public ZIP
   update refuses to replace this version unless explicitly forced.
 * Docker: never applied from inside the container. The host updater
-  (``update-docker.bat patreon``) runs ``fetch-source`` below in a disposable
-  container of the current image, checks the result, then applies the release
-  source archive with its own transaction and image rebuild.
+  (``update-docker.bat patreon``, Windows ZIP installations only) runs
+  ``fetch-source`` below in a disposable container of the current image,
+  checks the result, then applies the release source archive with its own
+  transaction and image rebuild.
 
-Nothing is applied while LDS has work running: the idle gate of plugin Apply
-(plugins/restart.py) is frozen before the first file changes and held until
-the process exits.
+In-app installs (Git, Pinokio, ZIP) apply nothing while LDS has work running:
+the idle gate of plugin Apply (plugins/restart.py) is frozen before the first
+file changes and held until the process exits. The Docker host updater cannot
+see that work, so the Updates card and the guide ask members to stop it first.
 """
 from __future__ import annotations
 
@@ -66,9 +68,13 @@ _SHA = re.compile(r'[0-9a-f]{40}\Z')
 DOCKER_LIMIT = ('This Patreon release has no Docker package: a container cannot replace its own image, '
                 'and the host update script needs the release source archive. Your installed version '
                 'keeps working.')
+# The host updater exists for Windows installations from the ZIP only (it
+# refuses a Git checkout), and it cannot see LDS's work: unlike the in-app
+# updates, nothing waits for running work before the image rebuild.
 DOCKER_HOST_COMMAND = 'update-docker.bat patreon'
-DOCKER_HOST_UPDATE = ('LDS cannot update itself inside Docker. On the computer that runs Docker, run '
-                      f'{DOCKER_HOST_COMMAND} in the LDS folder.')
+DOCKER_HOST_UPDATE = ('LDS cannot update itself inside Docker. For an LDS installation from the Windows ZIP, '
+                      f'stop running work first, then run {DOCKER_HOST_COMMAND} in the LDS folder on the '
+                      'computer that runs Docker.')
 PATREON_REQUIRED = 'This update is available to Patreon members. Connect Patreon or join, then check again.'
 AHEAD_OF_RELEASE = ('This installation is ahead of the members release: it already has public changes that '
                     'release does not include. Wait for the next Patreon release; your installed version keeps '

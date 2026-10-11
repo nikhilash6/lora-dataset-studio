@@ -79,6 +79,16 @@ test('the Patreon block of the Updates card renders each channel state', () => {
   assert.match(render(PatreonUpdates, { patreon: { status: 'not_configured' } }), /reserved for Patreon members/)
 })
 
+test('the Docker host command names its scope and asks to stop running work first', () => {
+  const html = render(PatreonUpdates, { patreon: { status: 'ready', update_available: true, install_mode: 'docker',
+    release: { version: '2026.10.20' }, can_apply: false, entitled: true, host_command: 'update-docker.bat patreon' } })
+  assert.match(html, /update-docker\.bat patreon/)
+  assert.match(html, /installation from the Windows ZIP only/)
+  assert.match(html, /Stop running work first/)
+  // No promise that the host updater waits for running work: it cannot see it.
+  assert.doesNotMatch(html, /nothing is applied while/i)
+})
+
 test('an install review asks for a Patreon membership, not a purchase', () => {
   const plan = { plan_id: 'x'.repeat(64), requested: 'manga', update_only: false,
     packages: [{ manifest: { id: 'manga', name: 'Manga Studio', version: '1.2.0' }, action: 'install' }],

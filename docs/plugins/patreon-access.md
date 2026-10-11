@@ -88,12 +88,14 @@ TUF target metadata; bytes come only through grants for `lds_core`.
 | Git checkout | Downloads the verified bundle, reads it into a private ref, then fast-forwards only. Local commits, modified tracked files or a diverged history refuse, like `git pull --ff-only`, before any download; a checkout that already took public commits newer than the release waits for the next Patreon release. LDS restarts itself. |
 | Pinokio | Same fast-forward. Pinokio keeps the restart: Stop, Update (installs changed requirements), Start. Until then LDS accepts no new work. |
 | ZIP | Downloads the verified archive and applies it with the existing staged swap, backup and rollback, then restarts. |
-| Docker | Installed from the host with `update-docker.bat patreon`, which the Updates card shows to members. See below. |
+| Docker | Windows installations from the ZIP only: installed from the host with `update-docker.bat patreon`, which the Updates card shows to members. Stop running work first. See below. |
 
-No update is applied while generation, training, captioning, a bank or dataset
-operation, an installation or another restart is in progress: the same idle
-check as plugin **Apply** runs before the first file changes, and new work stays
-refused until LDS restarts.
+In-app updates (Git checkout, Pinokio, ZIP) apply nothing while generation,
+training, captioning, a bank or dataset operation, an installation or another
+restart is in progress: the same idle check as plugin **Apply** runs before the
+first file changes, and new work stays refused until LDS restarts. The Docker
+host updater cannot see that work: stop it before running the command, because
+the image rebuild restarts LDS without waiting.
 
 A fast-forwarded checkout records the release in `refs/lds/patreon/installed`.
 While HEAD contains that commit and the public branch does not, the public
@@ -123,8 +125,15 @@ public releases anyway, choose **Install the public release instead** under
 ### Docker
 
 A container cannot replace its own image, so the Windows host updater installs
-Patreon releases: `update-docker.bat patreon` (ZIP installations; a Git
-checkout is refused unchanged).
+Patreon releases: `update-docker.bat patreon`. The command exists only for an
+LDS installation from the Windows ZIP archive; a Git checkout is refused
+unchanged and cannot install Patreon releases in Docker yet. Stop generation,
+training and other running work first: the host updater cannot see it, and
+the image rebuild restarts LDS.
+
+The Updates card shows the Patreon channel without plugin administration.
+Connecting Patreon from a browser behind Docker's bridge needs the plugin admin
+token, as installing plugins does (see the [Docker guide](../guide/docker.md)).
 
 1. It starts a disposable container of the current image, never the running
    one: ComfyUI, plugins and the app do not start. That container runs

@@ -63,11 +63,16 @@ export default function PatreonUpdates({ patreon, installed = null, error = '', 
       </div>
     )
   } else if (view.kind === 'host') {
-    // Docker: the container never replaces its own image; the host updater does.
+    // Docker: the container never replaces its own image; the host updater
+    // does, and it cannot see LDS's work, unlike the in-app updates.
     body = (
       <div className="space-y-2">
         <p className="text-content"><span aria-hidden>⬆</span> {view.text}</p>
-        <p className="text-content-muted">Docker installs it from the host. In the LDS folder, run:</p>
+        <p className="text-content-muted">
+          Docker installs it from the host, for an LDS installation from the Windows ZIP only. Stop running
+          work first (generation, training, captioning): the update rebuilds and restarts LDS without waiting
+          for it. Then, in the LDS folder, run:
+        </p>
         <code className="block overflow-x-auto whitespace-nowrap rounded bg-app/70 px-2 py-1 text-xs text-content">
           {view.command}
         </code>

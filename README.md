@@ -105,7 +105,7 @@ Complete **Setup**, then create a dataset or install the plugins you need. Impor
 | Pinokio | [One-click installation](docs/guide/installation.md#pinokio) |
 | Rented RunPod GPU | [RunPod guide](docs/guide/runpod.md) |
 
-**Updates:** new LDS versions are reserved for Patreon members and install from **Settings → Maintenance → Updates**. Git and Pinokio checkouts fast-forward to a verified release; ZIP installations swap in a verified archive and retain their datasets, media, settings and history. Docker installations cannot apply Patreon releases yet. Without a membership, the installed version keeps working; `v1` is frozen and old `main` installations must [migrate to V2](docs/guide/migrate-to-v2.md). Pinokio and Docker keep their own [update procedures](docs/guide/installation.md).
+**Updates:** new LDS versions are reserved for Patreon members and install from **Settings → Maintenance → Updates**. Git and Pinokio checkouts fast-forward to a verified release; ZIP installations swap in a verified archive and retain their datasets, media, settings and history. Docker installations from the Windows ZIP install them from the host with `update-docker.bat patreon`. Without a membership, the installed version keeps working; `v1` is frozen and old `main` installations must [migrate to V2](docs/guide/migrate-to-v2.md). Pinokio and Docker keep their own [update procedures](docs/guide/installation.md).
 
 ### Minimum requirements
 

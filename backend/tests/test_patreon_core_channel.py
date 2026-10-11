@@ -572,6 +572,9 @@ def test_docker_never_applies_inside_the_container(repos, service, client, monke
     response = client.post('/api/update/patreon/apply', json={})
     assert response.status_code == 409 and response.json['code'] == 'docker_limit'
     assert 'update-docker.bat patreon' in response.json['reason']
+    # The host command exists for Windows ZIP installations only, and the host
+    # updater cannot wait for running work: the member must stop it first.
+    assert 'Windows ZIP' in response.json['reason'] and 'stop running work' in response.json['reason']
     assert service.grants() == []
 
 
