@@ -84,6 +84,13 @@ import { SETUP_DEEP_LINK_STEPS } from './hooks/useSetupSteps.js';
 // Newest first. Prepend new waves at the top.
 export const WHATS_NEW = [
   {
+    id: '2026-10-13-qwen21-community-training-preset',
+    date: '2026-10-13',
+    title: 'Start Qwen-Image 2.1 character training from a community recipe',
+    blurb: 'Character datasets now offer a Qwen-Image 2.1 LoKr preset under Advanced options → Presets. It applies the reported full-rank factor-4, Automagic3 and multi-resolution settings, with a 2,000–3,000-step target and previews every 250 steps. The Guide links the reports and explains where results vary.',
+    to: '/datasets?section=training',
+  },
+  {
     id: '2026-10-11-z-lmstudio-framing',
     date: '2026-10-11',
     title: 'Classify framing reads close-ups again with LM Studio',

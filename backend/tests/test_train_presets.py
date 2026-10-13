@@ -212,19 +212,22 @@ _APPROVED_BUILTIN_IDS = {
     'builtin-krea-raw-style-compact',
     'builtin-krea-raw-concept-16gb',
     'builtin-zimage-turbo-character-balanced',
+    'builtin-qwenimage21-character-lokr-multires',
 }
 
 
 def test_quick_preset_catalogue_covers_every_family_and_kind(client):
     listed = client.get('/api/train/presets').get_json()['presets']
     builtins = [p for p in listed if p.get('builtin')]
-    assert len(builtins) == 23
+    assert len(builtins) == 24
     assert {p['id'] for p in builtins} == (
         _ORIGINAL_BUILTIN_IDS | _APPROVED_BUILTIN_IDS)
     coverage = {}
     for preset in builtins:
         coverage.setdefault((preset['train_type'], preset['dataset_kind']), set()).add(preset['id'])
-    assert set(coverage) == set(_QUICK_PRESET_MATRIX)
+    assert set(coverage) == set(_QUICK_PRESET_MATRIX) | {('qwenimage21', 'character')}
+    assert coverage[('qwenimage21', 'character')] == {
+        'builtin-qwenimage21-character-lokr-multires'}
     for scope, preset_id in _QUICK_PRESET_MATRIX.items():
         assert preset_id in coverage[scope]
     assert coverage[('krea', 'character')] == {
@@ -320,6 +323,7 @@ def test_approved_builtin_metadata_scopes_and_clean_apply(client, app):
         'builtin-krea-raw-style-compact': ('krea', 'style', ['base', 'raw']),
         'builtin-krea-raw-concept-16gb': ('krea', 'concept', ['base', 'raw']),
         'builtin-zimage-turbo-character-balanced': ('zimage', 'character', ['turbo']),
+        'builtin-qwenimage21-character-lokr-multires': ('qwenimage21', 'character', []),
     }
     expected_sources = {
         'builtin-krea-raw-character-balanced':
@@ -337,6 +341,9 @@ def test_approved_builtin_metadata_scopes_and_clean_apply(client, app):
         'builtin-zimage-turbo-character-balanced':
             'https://www.reddit.com/r/StableDiffusion/comments/1q1ahx9/'
             'some_zimageturbo_training_presets_for_12gb_vram/',
+        'builtin-qwenimage21-character-lokr-multires':
+            'https://www.reddit.com/r/StableDiffusion/comments/1x0jmuw/'
+            'my_workflow_for_realism_with_qwen_21/',
     }
     for idx, (preset_id, (family, kind, variants)) in enumerate(expected_scope.items()):
         preset = approved[preset_id]
@@ -363,7 +370,7 @@ def test_approved_builtin_metadata_scopes_and_clean_apply(client, app):
         r = client.post(f'/api/dataset/{ds_id}/train/presets/apply', json={
             'preset_id': preset_id,
             'train_type': family,
-            'variant': variants[0],
+            **({'variant': variants[0]} if variants else {}),
         })
         assert r.status_code == 200, (preset_id, r.get_json())
         body = r.get_json()
@@ -373,13 +380,14 @@ def test_approved_builtin_metadata_scopes_and_clean_apply(client, app):
             assert lt.snapshot_train_settings('local', ds_id) == preset['settings']
 
 
-def test_approved_presets_emit_exact_krea_and_zimage_primitives(client, app, tmp_path):
+def test_approved_presets_emit_exact_training_primitives(client, app, tmp_path):
     cases = [
         ('builtin-krea-raw-character-balanced', 'krea', 'character', 'base'),
         ('builtin-krea-raw-character-lokr-fast', 'krea', 'character', 'base'),
         ('builtin-krea-raw-style-compact', 'krea', 'style', 'base'),
         ('builtin-krea-raw-concept-16gb', 'krea', 'concept', 'base'),
         ('builtin-zimage-turbo-character-balanced', 'zimage', 'character', 'turbo'),
+        ('builtin-qwenimage21-character-lokr-multires', 'qwenimage21', 'character', None),
     ]
     processes = {}
     for idx, (preset_id, family, kind, variant) in enumerate(cases):
@@ -398,6 +406,23 @@ def test_approved_presets_emit_exact_krea_and_zimage_primitives(client, app, tmp
             processes[preset_id] = lt.build_job_config(
                 ds, str(tmp_path / preset_id), steps=2222,
                 training_folder=str(tmp_path / 'runs'))['config']['process'][0]
+
+    qwen = processes['builtin-qwenimage21-character-lokr-multires']
+    assert qwen['model']['arch'] == 'qwen_image_2'
+    assert qwen['model']['qtype'] == qwen['model']['qtype_te'] == 'convrot8'
+    assert {k: qwen['network'][k] for k in (
+        'type', 'lokr_full_rank', 'lokr_factor')} == {
+            'type': 'lokr', 'lokr_full_rank': True, 'lokr_factor': 4}
+    assert qwen['train']['optimizer'] == 'automagic3'
+    assert qwen['train']['lr'] == 1e-4
+    assert qwen['train']['optimizer_params'] == {'weight_decay': 2e-4}
+    assert qwen['train']['timestep_type'] == 'sigmoid'
+    assert qwen['train']['content_or_style'] == 'balanced'
+    assert qwen['train']['batch_size'] == qwen['train']['gradient_accumulation'] == 1
+    assert qwen['train']['unload_text_encoder'] is False
+    assert qwen['datasets'][0]['resolution'] == [512, 768, 1024]
+    assert qwen['datasets'][0]['cache_text_embeddings'] is True
+    assert qwen['save']['save_every'] == qwen['sample']['sample_every'] == 250
 
     balanced = processes['builtin-krea-raw-character-balanced']
     assert balanced['network'] == {
@@ -500,6 +525,12 @@ def test_approved_preset_step_policies_drive_recommendation_and_info(client, app
         ('builtin-krea-raw-concept-16gb', 'krea', 'concept', 'base', 60, 3250),
         ('builtin-zimage-turbo-character-balanced',
          'zimage', 'character', 'turbo', 35, 3500),
+        ('builtin-qwenimage21-character-lokr-multires',
+         'qwenimage21', 'character', None, 30, 2000),
+        ('builtin-qwenimage21-character-lokr-multires',
+         'qwenimage21', 'character', None, 50, 2500),
+        ('builtin-qwenimage21-character-lokr-multires',
+         'qwenimage21', 'character', None, 70, 3000),
     ]
     for idx, (preset_id, family, kind, variant, count, expected) in enumerate(cases):
         ds_id = _create_ds(
@@ -536,6 +567,9 @@ def test_approved_builtin_scope_mismatches_are_atomic(client, app):
         ('builtin-krea-raw-style-compact', 'krea', 'style', 'turbo'),
         ('builtin-krea-raw-concept-16gb', 'krea', 'concept', 'turbo'),
         ('builtin-zimage-turbo-character-balanced', 'zimage', 'character', 'base'),
+        ('builtin-qwenimage21-character-lokr-multires', 'qwenimage21', 'style', None),
+        ('builtin-qwenimage21-character-lokr-multires', 'qwenimage21', 'concept', None),
+        ('builtin-qwenimage21-character-lokr-multires', 'krea', 'character', 'base'),
     ]
     for idx, (preset_id, family, kind, variant) in enumerate(cases):
         ds_id = _create_ds(

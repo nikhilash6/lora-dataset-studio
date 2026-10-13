@@ -37,6 +37,21 @@ GPU memory requirements have not been measured in LDS. The text encoder stays
 loaded, matching AI Toolkit's model defaults. Checkpoints have their own run
 suffix and deploy to `loras/qwenimage21`.
 
+For a **Character** dataset, **Advanced options → Presets → Built-in (community
+starting points)** offers **Qwen-Image 2.1 · Character LoKr Multires**. It applies
+full-rank LoKr factor 4, Automagic3 at `1e-4`, weight decay `2e-4`, sigmoid/Balanced,
+batch 1, cached captions and 512/768/1024 resolutions. The
+[original report](https://www.reddit.com/r/StableDiffusion/comments/1worox0/my_first_qwen_21_character_loras/)
+used 30–70 images; the
+[author's follow-up](https://www.reddit.com/r/StableDiffusion/comments/1x0jmuw/my_workflow_for_realism_with_qwen_21/)
+confirms full-rank factor 4 and reports convergence around 2,000–3,000 steps.
+LDS supplies a 50-steps/image target clamped to that range, with previews and
+checkpoints every 250 steps. Quantization and preview sampling retain the LDS
+defaults above. This is a reported starting point: the published examples also
+used extra inference LoRAs, and another user reported incomplete likeness with
+the same training settings. Compare your own checkpoints. The preset is scoped
+to Character datasets and does not appear for Style or Concept.
+
 Cloud Training uses a dedicated September 23 AI Toolkit image, at least 32 GB
 VRAM on an Ampere-or-newer GPU and 100 GB disk. Older saved cloud settings cannot
 select a smaller machine. Live hourly prices are shown; duration and total-cost
