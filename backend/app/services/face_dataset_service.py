@@ -6750,6 +6750,64 @@ def import_dataset_folder(user_id, dataset_id, folder, stats=None):
     return _merge_training_images(user_id, dataset_id, entries, captions, stats=stats)
 
 
+# Copy the images the user PICKED in another dataset of this library. Each file
+# takes the import_images path like an upload (stored under the import policy,
+# perceptual dedup against this dataset and within the batch), and its caption,
+# the caption's writer stamp, its framing and its web provenance travel with it,
+# as they do on a Bank promotion. The source dataset is only read.
+IMPORT_FROM_DATASET_MAX = 200
+
+
+def import_from_dataset(user_id, dataset_id, source_dataset_id, image_ids,
+                        stats=None):
+    """Copy the picked ``image_ids`` of ``source_dataset_id`` into
+    ``dataset_id``. A picked id that is no longer a readable image of the
+    source (deleted meanwhile, failed generation) counts as failed instead of
+    vanishing from the summary. Returns (ids, failed). ValueError on a request
+    that cannot run."""
+    if source_dataset_id == dataset_id:
+        raise ValueError('pick another dataset as the source')
+    if not get_dataset(user_id, dataset_id):
+        raise ValueError('dataset not found')
+    if not get_dataset(user_id, source_dataset_id):
+        raise ValueError('source dataset not found')
+    wanted = normalize_batch_image_ids(image_ids)
+    if len(wanted) > IMPORT_FROM_DATASET_MAX:
+        raise ValueError(f'max {IMPORT_FROM_DATASET_MAX} images per import')
+    rows = {row.id: row for row in FaceDatasetImage.query.filter(
+        FaceDatasetImage.dataset_id == source_dataset_id,
+        FaceDatasetImage.id.in_(wanted))}
+    picked = [rows[i] for i in wanted
+              if i in rows and rows[i].filename and rows[i].status != 'failed']
+    failed = len(wanted) - len(picked)
+    ids = []
+    # One dedupe snapshot for the whole request, under the stripe the chunked
+    # import_images calls re-enter (RLock), so a concurrent import cannot slip
+    # a duplicate in between two chunks. Chunks bound the bytes held in memory.
+    with _dataset_ingest_lock(user_id, dataset_id):
+        seen = _existing_dhash_rows(dataset_id)
+        for c0 in range(0, len(picked), IMPORT_MAX_FILES):
+            blobs, carried = [], []
+            for row in picked[c0:c0 + IMPORT_MAX_FILES]:
+                try:
+                    with open(_img_path(row), 'rb') as fh:
+                        blobs.append(fh.read())
+                except OSError:
+                    failed += 1
+                    continue
+                carried.append(row)
+            chunk_ids, chunk_failed = import_images(
+                user_id, dataset_id, blobs, crop=False, dedupe=True,
+                stats=stats, dedupe_seen=seen,
+                source_metadata=[row.source_metadata for row in carried],
+                captions=[row.caption for row in carried],
+                caption_origins=[row.caption_origin for row in carried],
+                framings=[row.framing for row in carried])
+            ids.extend(chunk_ids)
+            failed += chunk_failed
+    return ids, failed
+
+
 # Direct scrape-to-concept-dataset import, independent of the source
 # app's shared scraping pool. Scan URLs through read-only /scan and /thumb,
 # then download selected images directly into the dataset. Apply

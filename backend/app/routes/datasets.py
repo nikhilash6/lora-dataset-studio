@@ -2073,6 +2073,30 @@ def dataset_import_folder(dataset_id):
                     'small': stats.get('small', 0)})
 
 
+@bp.post('/dataset/<int:dataset_id>/import-from-dataset')
+def dataset_import_from_dataset(dataset_id):
+    """Copy the images picked in ANOTHER dataset of this library into this one.
+    Body: {source_dataset_id, image_ids}. Captions (with their writer stamp) and
+    framing travel with the pixels, near-duplicates of what is already here are
+    skipped, and the source dataset is only read. Full frame, never head-cropped:
+    these images were already curated once."""
+    if not svc.get_dataset(LOCAL_USER, dataset_id):
+        return jsonify({'error': 'not found'}), 404
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        return jsonify({'error': 'JSON body must be an object'}), 400
+    stats = {}
+    try:
+        source_id = dataset_activity.normalize_dataset_id(data.get('source_dataset_id'))
+        ids, failed = svc.import_from_dataset(
+            LOCAL_USER, dataset_id, source_id, data.get('image_ids'), stats=stats)
+    except Exception as e:
+        return _map_error(e)
+    return jsonify({'ok': True, 'imported': len(ids), 'failed': failed,
+                    'duplicates': stats.get('duplicates', 0),
+                    'small': stats.get('small', 0)})
+
+
 @bp.post('/dataset/<int:dataset_id>/captions/replace')
 def dataset_captions_replace(dataset_id):
     """Bulk find/replace across the KEPT images' captions.

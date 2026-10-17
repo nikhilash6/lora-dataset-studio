@@ -332,9 +332,11 @@ export const ACTION_TOPICS = [
 
 
 
-  action('action-import-from-bank', 'Import images from a bank',
+  action('action-import-from-bank', 'Import images from a bank or another dataset',
     ['bank', 'import from bank', 'promote', 'triaged', 'kept images', 'add images',
-     'copy from bank', 'reuse bank', 'nothing to promote', 'already imported'],
+     'copy from bank', 'reuse bank', 'nothing to promote', 'already imported',
+     'import from dataset', 'copy from another dataset', 'reuse dataset',
+     'pick images', 'one by one', 'select images'],
     '/datasets?section=add', 'using-the-app', 'the-image-bank-triage-a-big-folder'),
   action('action-edit-identity-prompt', 'Edit the identity instruction (Extra refs ✎)',
     ['identity', 'instruction', 'prompt', 'extra refs', 'multiple references', 'identity lock',
