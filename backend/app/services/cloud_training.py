@@ -7783,6 +7783,8 @@ def gallery_image(r) -> dict:
     under their cell-specific keys), because the Studio viewer reads the same
     facts the Gallery viewer does. One serializer, one shape, no surface where
     a row quietly knows less about itself."""
+    from .lora_test_studio import _base_model_family
+    base_family = _base_model_family(r.checkpoint)
     return {
         'id': r.id,
         'dataset_id': r.dataset_id,
@@ -7790,7 +7792,7 @@ def gallery_image(r) -> dict:
         'rating': r.rating,
         'prompt': r.prompt,
         'seed': r.seed,
-        'strength': r.strength,
+        'strength': None if base_family else r.strength,
         'step': r.step,
         # WHICH checkpoint made it. Redundant inside a checkpoint gallery (the
         # scope already says so) and load-bearing outside one: a pinned canvas
@@ -7812,7 +7814,8 @@ def gallery_image(r) -> dict:
         # renders that differ only by sampler or CFG look like a checkpoint
         # difference until you can read the settings. Nothing new is computed
         # here — these are columns, published.
-        'checkpoint': r.checkpoint,
+        'checkpoint': None if base_family else r.checkpoint,
+        **({'base_only': True, 'family': base_family} if base_family else {}),
         'base_model': r.z_model,
         'negative': r.negative,
         'cfg': r.cfg,

@@ -133,11 +133,12 @@ real CFG and a real step count (CFG 4 / 25 steps for Krea 2). The family's
 few-step Turbo defaults render a blurry sketch on it that reads as a failed
 training.
 
-One limit worth knowing before you go looking for a button that is not there:
-**the Test Studio is entered through a LoRA of the dataset.** A dataset trained
-only as a full model has none, so it cannot open the Studio at all. If you have
-any LoRA of that dataset deployed, pick it and set its **strength to 0** — no
-LoRA node is added at 0, so you generate with the bare model.
+Open **Test Studio → Base model only**, choose the **Model family** and its
+**Base model**, then enter a prompt or select a prompt batch. No trained dataset
+or LoRA is required. CFG, steps, format, seed and images per configuration work
+as usual. Images are saved in a **Test Studio · … (base model)** dataset; the
+latest run for each family reopens when you return, including Stop and Resume.
+Select a LoRA above whenever you want to test its effect or compare checkpoints.
 
 ## The generation queue
 

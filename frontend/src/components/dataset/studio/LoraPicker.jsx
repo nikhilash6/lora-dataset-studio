@@ -136,7 +136,13 @@ export default function LoraPicker({ preselectDataset, preselectFamily = null, o
   return (
     <div data-probe-panel="picker" className="flex flex-col gap-2 rounded-lg border border-border bg-surface p-3">
       <div className="flex items-center gap-2 flex-wrap">
-        <span className="text-content-muted text-[0.6875rem] uppercase">LoRA to test</span>
+        <span className="text-content-muted text-[0.6875rem] uppercase">LoRA to test (optional)</span>
+        <button type="button" onClick={() => setPicked({})} aria-pressed={count === 0}
+          disabled={loading}
+          className={`rounded-lg border px-2 py-1 text-xs ${count === 0
+            ? 'border-primary/40 bg-primary/10 text-content' : 'border-border text-content-muted'}`}>
+          Base model only
+        </button>
         {/*
          * This badge used to say Comparison for two or more LoRAs, which became inaccurate once
          * Blend was a separate mode selected below in LoraStackPanel. State only the FACT of
@@ -154,7 +160,7 @@ export default function LoraPicker({ preselectDataset, preselectFamily = null, o
         <p className="text-content-subtle text-sm">Loading LoRA…</p>
       ) : loras.length === 0 ? (
         <p className="text-content-subtle text-sm">
-          No trained LoRA available. Train a LoRA from the Dataset Maker first.
+          No trained LoRA available. You can generate with a base model below.
         </p>
       ) : (
         <div className="max-h-72 overflow-auto flex flex-col gap-1.5">

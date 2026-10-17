@@ -21,7 +21,7 @@ import { launchText as batchLaunchText } from './promptBatch';
 import { heavyRunConfirm, heavyRunNotice, runCost } from './runCost';
 
 export default function StudioRunSetup({
-  selectionCount, strengths, onToggleStrength,
+  selectionCount, strengths, onToggleStrength, baseOnly = false,
   prompt, onPrompt, seed, onReroll, count, onCount,
   onLaunch, launching, gpuBusy, batchMult = 1, combine = false, combineBlocked = null,
   configCount = 1,
@@ -50,7 +50,7 @@ export default function StudioRunSetup({
   // another pass over that grid; show its cost BEFORE clicking.
   const picked = Array.isArray(pickedPrompts) ? pickedPrompts : [];
   const cells = cellCount({
-    selectionCount, strengthCount: strengths.length, count, batchMult, combine, configCount,
+    selectionCount, strengthCount: strengths.length, count, batchMult, combine, configCount, baseOnly,
     axisTotal, promptCount: Math.max(1, picked.length),
   });
   const canLaunch = cells > 0 && !launching && !gpuBusy && !combineBlocked;
@@ -100,7 +100,7 @@ export default function StudioRunSetup({
         </p>
       )}
 
-      {!combine && (
+      {!baseOnly && !combine && (
         <StrengthPicker choices={STRENGTH_CHOICES} selected={strengths} onToggle={onToggleStrength} fmt={fmt} />
       )}
 
@@ -115,7 +115,7 @@ export default function StudioRunSetup({
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div className="flex flex-wrap items-center gap-2">
             <label htmlFor="studio-run-prompt" className="text-content-muted text-[0.625rem] uppercase">
-              Prompt (optional)
+              {baseOnly ? 'Prompt' : 'Prompt (optional)'}
             </label>
             {onInjectTrigger && (
               <label className="flex items-center gap-1 text-content-subtle text-[0.625rem] cursor-pointer"
@@ -139,7 +139,7 @@ export default function StudioRunSetup({
           </div>
         </div>
         <textarea id="studio-run-prompt" value={prompt} onChange={(e) => onPrompt(e.target.value)} rows={5}
-          placeholder="Leave empty for the LoRA's default prompt…"
+          placeholder={baseOnly ? 'Describe the image to generate…' : "Leave empty for the LoRA's default prompt…"}
           className="rounded-lg border border-border bg-app/60 px-2.5 py-1.5 text-content text-sm resize-y min-h-[7rem]" />
       </div>
       <DescribeImageModal open={describeOpen} onClose={() => setDescribeOpen(false)}
@@ -187,10 +187,10 @@ export default function StudioRunSetup({
 
       <div className="flex items-center gap-2 flex-wrap">
         <span className="text-content-subtle text-[0.6875rem]"
-          title={combine
+          title={baseOnly ? 'GPU cost: images per configuration × render settings × prompts' : combine
             ? `GPU cost: ${configCount} weight combination(s) of ${selectionCount} LoRAs × images per config`
             : `GPU cost: checked LoRAs × strengths × images per config${batchMult > 1 ? ` × ${batchMult} (⚖ batch axis: without + with each checked LoRA)` : ''}${axisTotal > 1 ? ` × ${axisTotal} (🎛 CFG / steps axes)` : ''}${picked.length > 1 ? ` × ${picked.length} (📝 prompt batch: one image set per ticked prompt)` : ''}`}>
-          {combine
+          {baseOnly ? <>Base model × {count}</> : combine
             ? (
               <>
                 {configCount > 1
@@ -225,7 +225,7 @@ export default function StudioRunSetup({
           <span aria-hidden>⏱</span> {heavyRunNotice(cost)}
         </p>
       )}
-      {selectionCount === 0 && (
+      {!baseOnly && selectionCount === 0 && (
         <p className="m-0 text-amber-300 text-[0.6875rem]">Check at least one LoRA above.</p>
       )}
       {combineBlocked && (

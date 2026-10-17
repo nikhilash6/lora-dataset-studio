@@ -358,7 +358,7 @@ def _run_family_map(rows) -> dict:
         rid = getattr(r, 'run_id', None)
         if not rid or rid in out:
             continue
-        fam = family_of_lora(getattr(r, 'checkpoint', None))
+        fam = _base_model_family(getattr(r, 'checkpoint', None)) or family_of_lora(getattr(r, 'checkpoint', None))
         if fam:
             out[rid] = fam
     return out
@@ -370,7 +370,8 @@ def _row_family(row, by_run, default='zimage'):
     Pass `default=None` to distinguish 'still unknown' from zimage — a
     guest-only run has no sibling to inherit from and must not collapse
     to zimage or it vanishes from a Krea studio."""
-    return (family_of_lora(getattr(row, 'checkpoint', None))
+    return (_base_model_family(getattr(row, 'checkpoint', None))
+            or family_of_lora(getattr(row, 'checkpoint', None))
             or by_run.get(getattr(row, 'run_id', None))
             or default)
 
@@ -1132,7 +1133,7 @@ def apply_sdxl_lora_test_settings(workflow, *, base_ckpt, lora_name, strength,
     57 uses steps2 or falls back to steps. Reject non-allowlisted paths."""
     if allowed_bases is not None and base_ckpt not in allowed_bases:
         raise ValueError(f"unknown SDXL checkpoint: {base_ckpt}")
-    if allowed_loras is not None and lora_name not in allowed_loras:
+    if lora_name and allowed_loras is not None and lora_name not in allowed_loras:
         raise ValueError(f"unknown SDXL LoRA: {lora_name}")
 
     def _set(node_id, key, value):
@@ -1145,6 +1146,8 @@ def apply_sdxl_lora_test_settings(workflow, *, base_ckpt, lora_name, strength,
     _set("25", "lora_name", lora_name)
     _set("25", "strength_model", float(strength))
     _set("25", "strength_clip", float(strength))
+    if not lora_name:
+        _bypass_lora_loader(workflow, '25')
     _set("3", "text", prompt)
     _set("5", "seed", int(seed))
     if steps is not None:
@@ -1379,7 +1382,7 @@ def apply_klein_lora_test_settings(workflow, *, lora_name, strength, prompt, see
     Z-Image. Validate it against `allowed_bases` to prevent path injection, as
     for the LoRA. Clamp cfg to 1.0: Klein 9B is guidance-distilled and diverges
     above that value."""
-    if allowed_loras is not None and lora_name not in allowed_loras:
+    if lora_name and allowed_loras is not None and lora_name not in allowed_loras:
         raise ValueError(f'unknown Klein LoRA: {lora_name}')
     if base_model and allowed_bases is not None and base_model not in allowed_bases:
         raise ValueError(f'unknown Klein base model: {base_model}')
@@ -1403,6 +1406,8 @@ def apply_klein_lora_test_settings(workflow, *, lora_name, strength, prompt, see
 
     _set('29', 'lora_name', lora_name)
     _set('29', 'strength_model', float(strength))
+    if not lora_name:
+        _bypass_lora_loader(workflow, '29')
     _set('23', 'text', prompt)
     for node in ('25', '31'):                    # latent ET ModelSamplingFlux
         _set(node, 'width', int(width))
@@ -1528,7 +1533,7 @@ def apply_krea_lora_test_settings(workflow, *, lora_name, strength, prompt, seed
     `base_model` overrides the workflow's default local Krea UNET in node 20,
     using the same mechanism as SDXL (`base_ckpt`) / Z-Image (`z_model`). None
     leaves the node unchanged. Validate against `allowed_bases`, as for the LoRA."""
-    if allowed_loras is not None and lora_name not in allowed_loras:
+    if lora_name and allowed_loras is not None and lora_name not in allowed_loras:
         raise ValueError(f"unknown Krea LoRA: {lora_name}")
     if base_model and allowed_bases is not None and base_model not in allowed_bases:
         raise ValueError(f"unknown Krea base model: {base_model}")
@@ -1572,7 +1577,7 @@ def apply_krea_lora_test_settings(workflow, *, lora_name, strength, prompt, seed
     # Tested and always-on LoRAs share one node 20 -> 26 chain, as in Krea
     # generation. `allowed` contains the entire Krea pool, including always-on LoRAs.
     from ..utils.comfyui import inject_krea_loras
-    requested = [{"filename": lora_name, "strength": float(strength)}]
+    requested = [{"filename": lora_name, "strength": float(strength)}] if lora_name else []
     for e in (extra_loras or []):
         fn = str((e or {}).get("filename") or "")
         if not fn:
@@ -1703,6 +1708,12 @@ def _build_cell_workflow(user_id, checkpoint, strength, prompt, seed, z_model,
     collisions within a dataset when rerunning after a ComfyUI restart."""
     # Inject trigger words here, only when building the graph; retain the raw
     # prompt in storage. `trigger_word` may be a list, one per stacked LoRA.
+    base_family = _base_model_family(checkpoint)
+    if base_family:
+        if base_family != train_type:
+            raise ValueError('base-model run family does not match its saved settings')
+        checkpoint = None
+        trigger_word = None
     prompt = _prompt_with_triggers(prompt, trigger_word)
     ds_tag = f"d{dataset_id}_" if dataset_id is not None else ""
     fname = f"{user_id}_{ds_tag}LoraTest_{uuid.uuid4().hex[:8]}"
@@ -1715,7 +1726,7 @@ def _build_cell_workflow(user_id, checkpoint, strength, prompt, seed, z_model,
         assets = resolve_family_assets(family, z_model)
         return build_trained_image_workflow(
             family, base_model=z_model, assets=assets,
-            loras=[{'filename': checkpoint, 'strength': strength}] + list(extra_loras),
+            loras=([{'filename': checkpoint, 'strength': strength}] if checkpoint else []) + list(extra_loras),
             allowed_bases=set(bases),
             allowed_loras=set(allowed_loras) | {e['filename'] for e in extra_loras},
             prompt=prompt, negative=negative or '', seed=seed,
@@ -1789,7 +1800,7 @@ def _build_cell_workflow(user_id, checkpoint, strength, prompt, seed, z_model,
                            for m in get_flux2_klein_models()},
         )
         # Blend and permanent LoRAs belong to the same graph as the tested head.
-        model_ref = ['29', 0]
+        model_ref = workflow['31']['inputs']['model']
         for index, entry in enumerate(extra_loras):
             name = f'lds_klein_lora_{index}'
             workflow[name] = {'class_type': 'LoraLoaderModelOnly', 'inputs': {
@@ -1810,7 +1821,7 @@ def _build_cell_workflow(user_id, checkpoint, strength, prompt, seed, z_model,
     apply_zimage_settings(
         workflow,
         z_model=z_model,
-        z_loras=[{'filename': checkpoint, 'strength': strength}] + list(extra_loras),
+        z_loras=([{'filename': checkpoint, 'strength': strength}] if checkpoint else []) + list(extra_loras),
         prompt=prompt,
         negative=negative,
         seed=seed,
@@ -1843,7 +1854,7 @@ def _enqueue_cell(user_id, dataset_id, workflow, prompt, job_id=None, commit=Tru
         cell = db.session.get(LoraTestImage, cell_id)
         if cell is not None:
             dataset = db.session.get(FaceDataset, cell.dataset_id)
-            metadata['family'] = (family_of_lora(cell.checkpoint)
+            metadata['family'] = (_base_model_family(cell.checkpoint) or family_of_lora(cell.checkpoint)
                                   or getattr(dataset, 'train_type', None) or 'zimage')
             metadata['base_model'] = cell.z_model
     if run_id:
@@ -2435,7 +2446,7 @@ def _preflight_run(user_id, run_family, checkpoint, bases, allowed, prompt, seed
                 dataset_id=dataset_id, train_type=run_family, trigger_word=trigger_word,
                 sampler_preset=sampler_preset))
         except Exception as e:  # noqa: BLE001 — a bad representative build ≠ a missing asset
-            if run_family in TRAINED_IMAGE_FAMILIES:
+            if _base_model_family(checkpoint) or run_family in TRAINED_IMAGE_FAMILIES:
                 raise
             logger.warning('studio preflight: representative build failed (base=%r): %s', base, e)
     preflight_family(run_family, wfs)
@@ -3113,17 +3124,49 @@ def _combine_weights(sel) -> list:
     return out or [_combine_weight(sel)]
 
 
-def _cmp_resolve_run_family(selections):
+def _base_model_family(checkpoint):
+    """Recognize the saved base-only identity, never a filename sent to ComfyUI.
+
+    Keep the family on each cell so changing the storage dataset's training
+    settings cannot change a resumed run's pipeline. No schema migration needed.
+    """
+    prefix = 'base-model-only/'
+    if isinstance(checkpoint, str) and checkpoint.startswith(prefix):
+        family = checkpoint[len(prefix):]
+        if family in GENERATION_FAMILIES:
+            return family
+    return None
+
+
+def _base_model_dataset(user_id, family):
+    """Normal, visible dataset holding Studio images for this model family."""
+    trigger = f'studio_base_only_{family}'
+    dataset = FaceDataset.query.filter_by(user_id=str(user_id), trigger_word=trigger).first()
+    if dataset is None:
+        dataset = fds.create_dataset(
+            user_id, f"Test Studio · {_MODE_LABEL_BY_FAMILY.get(family, family)} (base model)",
+            trigger, train_type=family)
+    return dataset
+
+
+def _cmp_resolve_run_family(selections, base_family=None):
     """Validate comparison-run inputs, extracted unchanged on 2026-08-23.
     Reject empty selections, busy GPU, an active run or mixed families, then
     resolve the run family and allowed bases. Return (run_type, models)."""
-    if not selections:
+    if base_family is not None:
+        if base_family not in GENERATION_FAMILIES:
+            raise ValueError('choose a supported model family for base-model generation')
+        if selections:
+            raise ValueError('base-model generation does not accept selected LoRAs')
+    elif not selections:
         raise ValueError('no LoRA selected')
     reason = gpu_busy_reason()
     if reason:
         raise GpuBusyError(reason)
     if _active_run_count():
         raise ValueError('a test run is already in progress - wait for it to finish or cancel')
+    if base_family is not None:
+        return base_family, _require_family_bases(base_family)
     # Derive family from checkpoint folders (family_of_lora), not ds.train_type:
     # a dataset can train multiple families. A run uses one family because bases
     # and workflows differ. Resolve its base before entering the loop.
@@ -3461,7 +3504,7 @@ def _cmp_enqueue_cells(user_id, cell_plan, members, _dataset_and_checkpoints,
 
 
 def create_comparison_run(user_id, selections, strengths, settings=None, *,
-                          combine=None, prompts=None, external_loras=None) -> dict:
+                          combine=None, prompts=None, external_loras=None, base_family=None) -> dict:
     """Launch one comparison run across LoRAs. `selections` contains
     [{dataset_id, checkpoint}]. Entries may carry `record_id`/`step`, which the
     LoRA Canvas knows from the selected checkpoint. Stamp these unchanged on
@@ -3514,10 +3557,16 @@ def create_comparison_run(user_id, selections, strengths, settings=None, *,
     finish_sharpen = settings.finish_sharpen
     finish_grain = settings.finish_grain
     # Trigger word checkbox follows create_run: False means the raw prompt.
-    inject_trigger = settings.inject_trigger is not False
-    run_type, models = _cmp_resolve_run_family(selections)
+    inject_trigger = base_family is None and settings.inject_trigger is not False
+    run_type, models = _cmp_resolve_run_family(selections, base_family)
     valid_models, seed, count, seeds, prompt_axis = _cmp_seed_and_prompts(
         models, z_model, z_models, seed, count, prompt, prompts, family=run_type)
+    if base_family is not None:
+        if combine or permanent_loras or batch_loras or external_loras:
+            raise ValueError('base-model generation does not accept LoRA settings')
+        if not all(prompt_axis):
+            raise ValueError('enter a prompt or select a prompt batch for base-model generation')
+        strengths = [0.0]
     extra_loras, externals = _cmp_collect_extra_loras(
         run_type, permanent_loras, external_loras)
     batch_axis, knobs = _cmp_cell_knobs(
@@ -3528,10 +3577,20 @@ def create_comparison_run(user_id, selections, strengths, settings=None, *,
         hires_scale=hires_scale, hires_denoise=hires_denoise,
         finish_sharpen=finish_sharpen, finish_grain=finish_grain)
 
-    _dataset_and_checkpoints = _cmp_preflight(
-        user_id, run_type, selections, externals, valid_models,
-        prompt_axis, seeds, inject_trigger=inject_trigger,
-        sampler_preset=knobs['sampler_preset'])
+    if base_family is not None:
+        checkpoint = f'base-model-only/{run_type}'
+        _preflight_run(user_id, run_type, checkpoint, valid_models, set(),
+                       prompt_axis[0], seeds[0], None, None,
+                       sampler_preset=knobs['sampler_preset'])
+        dataset = _base_model_dataset(user_id, run_type)
+        selections = [{'dataset_id': dataset.id, 'checkpoint': checkpoint}]
+        def _dataset_and_checkpoints(did):
+            return (dataset, {checkpoint}) if did == dataset.id else (None, set())
+    else:
+        _dataset_and_checkpoints = _cmp_preflight(
+            user_id, run_type, selections, externals, valid_models,
+            prompt_axis, seeds, inject_trigger=inject_trigger,
+            sampler_preset=knobs['sampler_preset'])
 
     # Read target ComfyUI classes once per run (see create_run) and resolve
     # NODE_CLASS_ALIASES to the actual registered names.
@@ -3539,7 +3598,7 @@ def create_comparison_run(user_id, selections, strengths, settings=None, *,
     # Resolve each selected LoRA's origin (run and step) from explicit Canvas
     # input or its deployment tag. Resolve once per distinct filename.
     origin_of = checkpoint_origins(
-        [s.get('checkpoint') for s in selections if s.get('checkpoint')],
+        [s.get('checkpoint') for s in selections if s.get('checkpoint') and not base_family],
         {s['checkpoint']: s for s in selections
          if s.get('checkpoint') and s.get('record_id') is not None
          and s.get('step') is not None})
@@ -3559,8 +3618,9 @@ def create_comparison_run(user_id, selections, strengths, settings=None, *,
     # Use len(members), not len(stack_extra), which now lives inside the loop
     # and would represent the last combination or be absent for an empty plan.
     # Log the combination count to explain unexpectedly large image totals.
-    logger.info(f"lora-test: {'combined' if combine else 'comparison'} run {run_id} -> "
-                f"{len(ids)} cell(s), {len(selections) + len(members)} LoRA, "
+    mode = 'base model' if base_family else 'combined' if combine else 'comparison'
+    logger.info(f"lora-test: {mode} run {run_id} -> "
+                f"{len(ids)} cell(s), {0 if base_family else len(selections) + len(members)} LoRA, "
                 f"{len(combos) if combine else 1} combinaison(s), "
                 f"{len(prompt_axis)} prompt(s), seed {seed}")
     return {'created': len(ids), 'seed': seed, 'count': count, 'run_id': run_id, 'ids': ids}
@@ -3757,9 +3817,9 @@ def resume_run(user_id, dataset_id=None, run_id=None) -> dict:
     for img in rows:
         cell_ds = _ds(img.dataset_id)
         # Checkpoint folder (train_type fallback) determines family, allowlist, base, dimensions and workflow.
-        cell_family = (family_of_lora(img.checkpoint)
+        cell_family = (_base_model_family(img.checkpoint) or family_of_lora(img.checkpoint)
                        or getattr(cell_ds, 'train_type', None) or 'zimage').lower()
-        allowed = _allowed(img.dataset_id, cell_family)
+        allowed = {img.checkpoint} if _base_model_family(img.checkpoint) else _allowed(img.dataset_id, cell_family)
         if not cell_ds or img.checkpoint not in allowed:
             continue  # skip a missing dataset/checkpoint
         # A replay uses the saved base or fails explicitly if it was removed.
@@ -5157,12 +5217,13 @@ def studio_payload_run(user_id, run_id) -> dict | None:
         ds = db.session.get(FaceDataset, d); return ds.name if ds else str(d)
     return {
         'run_id': run_id,
+        'base_only': all(_base_model_family(r.checkpoint) for r in rows),
         'loras': [{'dataset_id': d, 'lora_label': _lbl(d), 'dataset_name': _name(d)}
                   for d in sorted(ds_ids)],
         # Extend the shared cloud_training.gallery_image serializer, using the
         # same contract as studio_payload above.
         'cells': [{**_shared_cell(r),
-                   'label': _basename(r.checkpoint).rsplit('.', 1)[0],
+                   'label': 'Base model' if _base_model_family(r.checkpoint) else _basename(r.checkpoint).rsplit('.', 1)[0],
                    'filename': r.filename, 'run_seed': r.run_seed, 'status': r.status,
                    'queue_status': activity['queue_status'].get(r.job_id),
                    'queue_error': activity['queue_error'].get(r.job_id),

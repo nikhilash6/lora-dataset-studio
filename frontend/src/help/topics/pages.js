@@ -428,6 +428,10 @@ export const PAGE_TOPICS = [
       'z-image base', 'base vs turbo', 'cfg 1', '8 steps', 'blurry base model'],
     guide: { chapter: 'dataset-guide', anchor: '6-after-training-pick-the-right-checkpoint' },
     app: { route: '/studio' } },
+  { id: 'studio-base-model-only', kind: 'setting', title: 'Generate without a LoRA',
+    keywords: ['base model only', 'no lora', 'without lora', 'model family', 'full model', 'generate'],
+    guide: { chapter: 'using-the-app', anchor: 'testing-a-full-model' },
+    app: { route: '/studio' } },
   // The topic ID keeps the word `combine`: it is referenced from JSX and from the
   // guide, and the mode was CALLED Combine until 2026-08-03 — the keywords keep it
   // too, so anyone who read the older What's-new entry still finds this.

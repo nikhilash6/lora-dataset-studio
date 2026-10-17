@@ -26,6 +26,14 @@ from ._common import (_map_error, _require_comfyui, _require_no_stalled_comfyui,
 
 bp = Blueprint('studio', __name__, url_prefix='/api/studio')
 
+
+@bp.get('/families')
+def studio_families():
+    """Generation pipelines available without a trained dataset or LoRA."""
+    return jsonify({'families': [
+        {'id': family, 'label': lts._MODE_LABEL_BY_FAMILY.get(family, family)}
+        for family in lts.GENERATION_FAMILIES]})
+
 # SQLite Integer primary keys are signed 64-bit values.  Python ints are
 # arbitrary precision, so validate before an oversized JSON value reaches a DB bind.
 _MAX_DATABASE_ID = (1 << 63) - 1
@@ -348,6 +356,7 @@ def studio_run():
             # unlike dataset and canvas launch routes. Absent body field remains
             # None, preserving previous single-prompt behavior.
             prompts=d.get('prompts'),
+            base_family=(d.get('family') or '') if d.get('base_only') is True else None,
             external_loras=d.get('external_loras'), combine=d.get('combine'))
     except Exception as e:
         from ..services.lora_test_studio import StudioArchMismatch, StudioAssetsMissing

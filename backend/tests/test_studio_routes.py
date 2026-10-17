@@ -55,6 +55,56 @@ def test_studio_run_invalid_params_still_400(client, monkeypatch):
     assert resp.get_json()['error'] == 'no LoRA selected'
 
 
+def test_base_model_run_without_dataset_keeps_prompt_axes_and_can_resume(client, monkeypatch):
+    from app.config import LOCAL_USER
+    from app.extensions import db
+    from app.models import FaceDataset, LoraTestImage
+    from app.services import lora_test_studio as lts
+
+    _comfy(monkeypatch, True)
+    monkeypatch.setattr(lts, 'gpu_busy_reason', lambda: None)
+    monkeypatch.setattr(lts, '_active_run_count', lambda *a: 0)
+    monkeypatch.setattr(lts, '_require_family_bases', lambda family: ['base.safetensors'])
+    monkeypatch.setattr(lts, '_target_node_classes', lambda: None)
+    monkeypatch.setattr(lts, '_preflight_run', lambda *a, **k: None)
+    built = []
+    monkeypatch.setattr(lts, '_build_cell_workflow', lambda *a, **k: built.append((a, k)) or {'1': {}})
+    monkeypatch.setattr(lts.queue_manager, 'add_job', lambda **k: None)
+    body = {'base_only': True, 'family': 'zimage', 'z_model': 'base.safetensors',
+            'prompts': ['a fox', 'a dragon'], 'seed': 123, 'count': 2,
+            'cfgs': [1], 'steps_list': [8], 'aspects': ['1:1']}
+    # No dataset, trained checkpoint, strength selection or trigger is needed.
+    response = client.post('/api/studio/run', json=body)
+    assert response.status_code == 200, response.get_json()
+    result = response.get_json()
+    assert result['created'] == 4
+    with client.application.app_context():
+        dataset = FaceDataset.query.filter_by(user_id=LOCAL_USER).one()
+        cells = LoraTestImage.query.filter_by(run_id=result['run_id']).all()
+        assert {(c.prompt, c.seed) for c in cells} == {
+            ('a fox', 123), ('a fox', 124), ('a dragon', 123), ('a dragon', 124)}
+        assert all(c.strength == 0 and c.inject_trigger is False for c in cells)
+        assert all(c.record_id is None and c.extra_loras is None for c in cells)
+        # The saved family remains authoritative even if the storage dataset is edited.
+        dataset.train_type = 'sdxl'
+        for cell in cells:
+            cell.status = 'cancelled'
+        db.session.commit()
+    status = client.get(f"/api/studio/run/{result['run_id']}/status").get_json()
+    assert status['base_only'] is True
+    assert all(c['label'] == 'Base model' for c in status['cells'])
+    assert all(c['checkpoint'] is None and c['strength'] is None and c['family'] == 'zimage'
+               for c in status['cells'])
+    resumed = client.post(f"/api/studio/run/{result['run_id']}/resume")
+    assert resumed.status_code == 200, resumed.get_json()
+    assert len(built) == 8
+    assert all(k['train_type'] == 'zimage' and k['trigger_word'] is None for _, k in built)
+    # An empty prompt has no dataset identity to fall back to, and unsupported families fail early.
+    assert client.post('/api/studio/run', json={**body, 'prompts': []}).status_code == 400
+    assert client.post('/api/studio/run', json={**body, 'family': 'moss'}).status_code == 400
+    assert client.post('/api/studio/run', json={**body, 'z_model': '../bad'}).status_code == 400
+
+
 def test_studio_run_reachable_forwards_to_service(client, monkeypatch):
     _comfy(monkeypatch, True)
     monkeypatch.setattr('app.services.lora_test_studio.create_comparison_run',

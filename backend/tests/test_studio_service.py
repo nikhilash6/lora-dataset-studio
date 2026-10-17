@@ -15,6 +15,38 @@ import pytest
 _ST = struct.pack('<Q', 2) + b'{}'
 
 
+@pytest.mark.parametrize('family', ('zimage', 'sdxl', 'krea', 'flux2klein', 'flux', 'anima', 'qwenimage21'))
+def test_base_only_workflows_need_no_lora_and_have_connected_nodes(app, monkeypatch, tmp_path, family):
+    from app import config
+    from app.services import lora_test_studio as lts, trained_image_models
+    from app.utils import comfyui
+    from app.utils.trained_image_workflows import ASSET_SPECS
+
+    with app.app_context():
+        (tmp_path / 'models').mkdir()
+        config.save_config({'comfyui': {'base_dir': str(tmp_path)}})
+        base = 'base.safetensors'
+        monkeypatch.setattr(comfyui, 'get_checkpoint_models', lambda: [{'name': base}])
+        monkeypatch.setattr(lts, 'resolve_checkpoint_ckpt_name', lambda name: name)
+        monkeypatch.setattr(lts, 'get_krea_models', lambda: [base])
+        monkeypatch.setattr(comfyui, 'get_flux2_klein_models', lambda: [base])
+        monkeypatch.setattr(lts, 'family_base_models', lambda family: [base])
+        if family in ASSET_SPECS:
+            assets = {k: spec['filename'] for k, spec in ASSET_SPECS[family].items()}
+            assets['diffusion_model'] = base
+            monkeypatch.setattr(trained_image_models, 'resolve_family_assets', lambda *a: assets)
+        graph = lts._build_cell_workflow(
+            'local', f'base-model-only/{family}', 0, 'a fox', 123, base, set(),
+            train_type=family, trigger_word='must_not_be_injected')
+        assert not any('lora_name' in n.get('inputs', {}) for n in graph.values())
+        for node in graph.values():
+            for value in node.get('inputs', {}).values():
+                if isinstance(value, list) and len(value) == 2:
+                    assert value[0] in graph, value
+                if isinstance(value, str):
+                    assert 'must_not_be_injected' not in value
+
+
 def test_build_matrix_shape_and_validation(app):
     from app.services.lora_test_studio import build_matrix
     m = build_matrix(['a.safetensors', 'b.safetensors'], [0.8, 1.0], aspects=['9:16'])

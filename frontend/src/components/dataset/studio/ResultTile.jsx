@@ -54,7 +54,7 @@ export default function ResultTile({ cell, row, strength, variant, datasetId, on
       )}
       {cell.status === 'done' && cell.filename && (
         <button type="button" onClick={() => onOpen(cell)}
-          title={`${row.label} @ ${fmt(strength)} (${variant.aspect || '—'}) seed ${cell.seed}${cell.batch_lora ? ` · + ${cell.batch_lora}` : ''} — open larger`}
+          title={`${row.label}${strength == null ? '' : ` @ ${fmt(strength)}`} (${variant.aspect || '—'}) seed ${cell.seed}${cell.batch_lora ? ` · + ${cell.batch_lora}` : ''} — open larger`}
           className="block p-0 m-0 border-0 bg-transparent cursor-pointer">
           {/* 80×112 CSS px — 256 covers it at 2× DPR with room to spare. The
               sweep grid is the densest picture surface in the app (a checkpoint
@@ -62,7 +62,7 @@ export default function ResultTile({ cell, row, strength, variant, datasetId, on
               full-size PNGs cost the most; the lightbox this tile opens still
               gets the file. */}
           <img src={`/api/dataset/${datasetId}/thumb/${encodeURIComponent(cell.filename)}?s=256`}
-            alt={`${row.label} strength ${fmt(strength)} ${variant.aspect || ''} seed ${cell.seed}`}
+            alt={`${row.label}${strength == null ? '' : ` strength ${fmt(strength)}`} ${variant.aspect || ''} seed ${cell.seed}`}
             loading="lazy" decoding="async"
             className="w-20 h-28 object-cover rounded-md border border-border" />
         </button>
@@ -109,11 +109,11 @@ export default function ResultTile({ cell, row, strength, variant, datasetId, on
       {cell.status === 'done' && (
         <div className="flex items-center gap-1">
           <button type="button" aria-pressed={cell.rating === 1}
-            aria-label={`Like ${row.label} @ ${fmt(strength)} (${variant.aspect || '—'}) seed ${cell.seed}`}
+            aria-label={`Like ${row.label}${strength == null ? '' : ` @ ${fmt(strength)}`} (${variant.aspect || '—'}) seed ${cell.seed}`}
             onClick={() => onRate(cell.id, cell.rating === 1 ? 0 : 1)}
             className={`px-1.5 py-0.5 rounded text-[0.75rem] border ${cell.rating === 1 ? 'border-green-400/60 bg-green-500/20' : 'border-border bg-surface opacity-70'}`}>👍</button>
           <button type="button" aria-pressed={cell.rating === -1}
-            aria-label={`Dislike ${row.label} @ ${fmt(strength)} (${variant.aspect || '—'}) seed ${cell.seed}`}
+            aria-label={`Dislike ${row.label}${strength == null ? '' : ` @ ${fmt(strength)}`} (${variant.aspect || '—'}) seed ${cell.seed}`}
             onClick={() => onRate(cell.id, cell.rating === -1 ? 0 : -1)}
             className={`px-1.5 py-0.5 rounded text-[0.75rem] border ${cell.rating === -1 ? 'border-red-400/60 bg-red-500/20' : 'border-border bg-surface opacity-70'}`}>👎</button>
         </div>

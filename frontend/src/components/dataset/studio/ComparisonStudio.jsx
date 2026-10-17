@@ -31,6 +31,7 @@ import StudioActionBar from './StudioActionBar';
 import StudioPreflightBanner from './StudioPreflightBanner';
 import StudioModelDownloads from './StudioModelDownloads';
 import LoraComparisonGrid from './LoraComparisonGrid';
+import ResultTile from './ResultTile';
 import LoraRankingPanel from './LoraRankingPanel';
 import RunSelector from './RunSelector';
 import QuickVoteModal from './QuickVoteModal';
@@ -40,11 +41,12 @@ import {
 } from '../../../utils/studioFamilySettings';
 
 const rollSeed = () => Math.floor(Math.random() * 2 ** 31);
+const NO_LORAS = [];
 
-export default function ComparisonStudio({ selection, baseModels = [], axes = null,
+export default function ComparisonStudio({ selection, baseOnly = false, baseModels = [], axes = null,
   modelDefaults = null, runType = 'zimage', baseNote = null,
   generationCapabilities = null, generationReadiness = null, defaultModel = null, settingsError = null,
-  onRefreshModels = null }) {
+  onRefreshModels = null, initialBase = null }) {
   const toast = useToast();
 
   // Run settings are persisted so page reloads preserve them.
@@ -107,7 +109,7 @@ export default function ComparisonStudio({ selection, baseModels = [], axes = nu
   const readAxis = (key) => readComparisonAxis(globalThis.localStorage, key, runType);
   // Untouched selection follows the first server model; an explicit choice stays visible if it
   // disappears. The shell remounts this component when the family changes.
-  const [baseChoice, setSelectedBase] = useState(null);
+  const [baseChoice, setSelectedBase] = useState(initialBase);
   const selectedBase = baseChoice ?? defaultModel ?? baseModels[0]?.filename ?? '';
   const modelError = modelSelectionError(baseModels.map((m) => ({ value: m.filename })),
     baseChoice == null && defaultModel == null ? [] : [selectedBase]);
@@ -158,7 +160,15 @@ export default function ComparisonStudio({ selection, baseModels = [], axes = nu
 
 
   // Managed run.
-  const [runId, setRunId] = useState(null);
+  const [runId, setRunId] = useState(() => {
+    if (!baseOnly) return null;
+    try { return localStorage.getItem(`studioBaseRun_${runType}`) || null; } catch { return null; }
+  });
+  useEffect(() => {
+    if (baseOnly && runId) {
+      try { localStorage.setItem(`studioBaseRun_${runType}`, runId); } catch { /* private mode */ }
+    }
+  }, [baseOnly, runId, runType]);
   const run = useStudioRun(runId);
   const data = run.data;
   const loras = data?.loras || [];
@@ -200,12 +210,13 @@ export default function ComparisonStudio({ selection, baseModels = [], axes = nu
     [displayedCells],
   );
 
-  const combine = mode === 'combine';
+  const combine = !baseOnly && mode === 'combine';
   const combineBlocked = combine ? combineBlocker(selection) : null;
   const launchBlocked = settingsError || generationReadiness?.config_error || modelError
     || (generationReadiness?.models_ready === false ? 'Download the required model files to continue.' : null)
     || (generationReadiness?.missing_nodes?.length ? 'Repair the missing ComfyUI nodes to continue.' : null)
-    || combineBlocked;
+    || combineBlocked
+    || (baseOnly && !prompt.trim() && !pickedPrompts.length ? 'Enter a prompt or select a prompt batch.' : null);
 
   // STACK view follows the DISPLAYED RUN, not the Compare/Blend toggle: yesterday's stack can be
   // opened while the toggle is on Compare, and vice versa.
@@ -243,15 +254,15 @@ export default function ComparisonStudio({ selection, baseModels = [], axes = nu
   };
 
   const launch = async () => {
-    if (!selection.length || launchBlocked) return;
-    if (!combine && !strengths.length) return;
+    if ((!baseOnly && !selection.length) || launchBlocked) return;
+    if (!baseOnly && !combine && !strengths.length) return;
     setLaunching(true);
     try {
       const body = {
         selections: buildSelectionsPayload(selection, { combine, weights: stackWeights, sets: stackSets }),
         // In combine mode every LoRA has its own weight, so omit the strengths axis; the backend
         // substitutes the leading LoRA's weight.
-        ...(combine ? { combine: true } : { strengths }),
+        ...(baseOnly ? { base_only: true, family: runType } : combine ? { combine: true } : { strengths }),
         seed,
         count,
         // Omit run base when it is empty (Krea's Official entry) or nothing is selected. The
@@ -271,7 +282,7 @@ export default function ComparisonStudio({ selection, baseModels = [], axes = nu
       if (pickedPrompts.length) body.prompts = [...pickedPrompts];
       // Unchecking Trigger word sends the prompt unchanged. When checked, omit the field to
       // preserve the previous request body byte-for-byte.
-      if (!injectTrigger) body.inject_trigger = false;
+      if (baseOnly || !injectTrigger) body.inject_trigger = false;
       const dResp = await postJson('/api/studio/run', body);
       // Keep this defensive path even though apiFetch currently throws on
       // non-2xx: alternate clients/tests may return the structured 409 body.
@@ -343,16 +354,17 @@ export default function ComparisonStudio({ selection, baseModels = [], axes = nu
         )}
         <StudioModelDownloads readiness={generationReadiness}
           onRefresh={async () => { await onRefreshModels?.(); setPreflight(null); }} />
-        <LoraStackPanel selection={selection} mode={mode} onMode={setMode}
+        {!baseOnly && <LoraStackPanel selection={selection} mode={mode} onMode={setMode}
           weights={stackWeights}
           sets={stackSets}
           onToggleChip={toggleStackChip}
           count={count}
           secondsPerImage={axes?.seconds_per_image ?? null}
           injectTrigger={injectTrigger}
-          onWeight={(k, v) => setStackWeights((cur) => ({ ...cur, [k]: v }))} />
+          onWeight={(k, v) => setStackWeights((cur) => ({ ...cur, [k]: v }))} />}
         <div id="st-setup" className="scroll-mt-16">
           <StudioRunSetup
+            baseOnly={baseOnly}
             selectionCount={selection.length}
             strengths={strengths}
             onToggleStrength={toggleStrength}
@@ -372,7 +384,7 @@ export default function ComparisonStudio({ selection, baseModels = [], axes = nu
             axisTotal={axisTotal({ cfgs: effectiveCfgs, steps: effectiveSteps, steps2: effectiveSteps2 })}
             secondsPerImage={axes?.seconds_per_image ?? null}
             injectTrigger={injectTrigger}
-            onInjectTrigger={toggleInjectTrigger}
+            onInjectTrigger={baseOnly ? null : toggleInjectTrigger}
             batchPrompts={historyBatch}
             onToggleBatchPrompt={toggleIn(setHistoryBatch)}
             onClearBatchPrompts={() => setHistoryBatch([])}
@@ -417,7 +429,8 @@ export default function ComparisonStudio({ selection, baseModels = [], axes = nu
           key={runType}
           family={runType}
           capabilities={generationCapabilities}
-          storagePrefix={`studioGenComp_${runType}`}
+          storagePrefix={`${baseOnly ? 'studioGenBase' : 'studioGenComp'}_${runType}`}
+          permanentLoras={baseOnly ? NO_LORAS : null}
           aspectPicker
           onChange={setGenSettings}
         />
@@ -425,7 +438,7 @@ export default function ComparisonStudio({ selection, baseModels = [], axes = nu
          * A stack has only one tested LoRA, making a one-row LoRA ranking uninformative. Show its
          * composition instead.
          */}
-        {showStackView ? (
+        {!baseOnly && (showStackView ? (
           <StackCompositionPanel members={shownStack} onSaveBest={saveStackBest}
             saving={savingBest} savedAt={bestSavedAt}
             // Use the displayed RUN's actual state, not the checkbox: one False cell is
@@ -433,7 +446,7 @@ export default function ComparisonStudio({ selection, baseModels = [], axes = nu
             injectTrigger={!cells.some((c) => c.inject_trigger === false)} />
         ) : (
           <LoraRankingPanel ranking={data?.lora_ranking} />
-        )}
+        ))}
       </aside>
 
       <main id="st-results" className="flex flex-col gap-3 min-w-0 scroll-mt-16">
@@ -477,7 +490,8 @@ export default function ComparisonStudio({ selection, baseModels = [], axes = nu
 
         {!runId ? (
           <p className="text-content-subtle text-sm rounded-lg border border-border bg-surface px-3 py-6 text-center">
-            Set up the run on the left then “🚀 Run the test”{combine
+            Set up the run on the left then “🚀 Run the test”{baseOnly
+              ? ' to generate with the selected base model.' : combine
               ? ` to render the ${selection.length} LoRAs together in one image.`
               : ` to compare the ${selection.length} LoRAs side by side.`}
           </p>
@@ -495,7 +509,15 @@ export default function ComparisonStudio({ selection, baseModels = [], axes = nu
               showResults={showResults}
               onToggleResults={() => setShowResults((v) => !v)}
             />
-            {showResults && (showStackView ? (
+            {showResults && (baseOnly ? (
+              <div className="flex flex-wrap gap-3">
+                {cells.map((cell) => (
+                  <ResultTile key={cell.id} cell={cell} row={{ label: 'Base model' }}
+                    variant={cell} strength={null} datasetId={cell.dataset_id}
+                    onRate={run.rate} onOpen={setLbImg} fmt={fmt} />
+                ))}
+              </div>
+            ) : showStackView ? (
               <StackVariantsGrid members={shownStack} variants={data?.stack_variants}
                 onRate={run.rate} onOpen={setLbImg} onSelectRun={setRunId}
                 onUseWeights={useVariantWeights} />
@@ -526,7 +548,7 @@ export default function ComparisonStudio({ selection, baseModels = [], axes = nu
           ...(supportsNegativePrompt(generationCapabilities, runType) ? [{ id: 'st-negative', emoji: '🚫', label: 'Negative' }] : []),
           { id: 'st-results', emoji: '🖼️', label: 'Results' },
         ]}
-        canRun={!!selection.length && (combine || !!strengths.length) && !launching && !data?.gpu_busy && !launchBlocked}
+        canRun={(baseOnly || (!!selection.length && (combine || !!strengths.length))) && !launching && !data?.gpu_busy && !launchBlocked}
         running={launching}
         onRun={launch}
       />

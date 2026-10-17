@@ -206,11 +206,12 @@ export function blendSweepCost({ configCount, count = 1, batchMult = 1,
  * CFG/steps would be inaccurate. Default one, no batch, preserves previous counts.
  */
 export function cellCount({ selectionCount, strengthCount, count, batchMult = 1,
-  combine = false, configCount = 1, axisTotal = 1, promptCount = 1 }) {
+  combine = false, configCount = 1, axisTotal = 1, promptCount = 1, baseOnly = false }) {
   const n = Math.max(0, Number(count) || 0);
   const mult = Math.max(1, Number(batchMult) || 1);
   const axes = Math.max(1, Number(axisTotal) || 1);
   const prompts = Math.max(1, Number(promptCount) || 1);
+  if (baseOnly) return n * mult * axes * prompts;
   if (combine) {
     return selectionCount >= 2
       ? Math.max(0, Number(configCount) || 0) * n * mult * axes * prompts : 0;
