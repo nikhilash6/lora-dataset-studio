@@ -200,6 +200,7 @@ def civitai_publish_images():
                             'the page first (paste its address) or create it.'), 409)
     title = d.get('title') if isinstance(d.get('title'), str) else None
     publish = d.get('publish', True) is not False
+    hide_meta = d.get('hide_meta') is True
     link_id = link.id
     app = current_app._get_current_object()
 
@@ -207,7 +208,8 @@ def civitai_publish_images():
         from .models import CivitaiLink
         from .models import db
         return cp.post_images(ids, db.session.get(CivitaiLink, link_id), key, title=title,
-                              publish=publish, progress=progress, user_id=LOCAL_USER)
+                              publish=publish, progress=progress, user_id=LOCAL_USER,
+                              hide_meta=hide_meta)
 
     return jsonify({'ok': True, 'job_id': cp.start_job(app, 'post', work),
                     'link': cp.link_payload(link)})

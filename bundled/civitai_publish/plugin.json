@@ -2,7 +2,7 @@
   "id": "civitai_publish",
   "bundled": true,
   "name": "Publish to Civitai",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "api": 1,
   "description": "Publish a trained checkpoint as a Civitai model page and post the images it generated under that page, without leaving the app — from a checkpoint's popover (run graph, LoRA Canvas) and from the image viewer. Uses the Civitai API key the scraper and the prompt browser already share.",
   "requires": [],
@@ -28,6 +28,7 @@
       "civitai_link"
     ],
     "whats_new_ids": [
+      "2026-10-17-civitai-post-generation-model",
       "2026-09-02-publish-to-civitai"
     ],
     "model_slots": []

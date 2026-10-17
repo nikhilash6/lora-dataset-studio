@@ -65,7 +65,16 @@ export default {
     setting('civitai.link_host', 'scraping', 'civitai-link-host', 'Civitai site for links',
       ['civitai', 'civitai.red', 'domain', 'mirror', 'links', 'publish', 'open on', 'draft 404']),
   ]).map(guideHelp),
-  whatsNew: MIGRATED_NEWS,
+  whatsNew: [{
+    id: '2026-10-17-civitai-post-generation-model',
+    date: '2026-10-17',
+    title: 'Civitai posts also tag the model they were generated with',
+    blurb: 'A picture posted from the image viewer’s 📤 button now also tags its base checkpoint '
+      + 'when Civitai hosts that file, so it appears in that model’s gallery too; the file is '
+      + 'identified once by its hash. A new option hides the prompt and generation data on '
+      + 'Civitai, like its own hide toggle.',
+    to: '/gallery',
+  }, ...MIGRATED_NEWS],
   paritySkip: [
     { slot: 'checkpoint.action', surface: 'video',
       reason: 'This product publishes image-training checkpoints; video checkpoints have a different publication contract.' },

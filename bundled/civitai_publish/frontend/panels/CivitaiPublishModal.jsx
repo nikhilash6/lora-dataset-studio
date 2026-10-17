@@ -106,6 +106,13 @@ export default function CivitaiPublishModal({ context, onClose }) {
   const [form, setForm] = useState(null);
   const [postTitle, setPostTitle] = useState('');
   const [publishNow, setPublishNow] = useState(true);
+  // Kept between posts, like a habit of the account rather than of one picture.
+  const [hideMeta, setHideMeta] = useState(() => {
+    try { return localStorage.getItem('civitaiPost_hideMeta') === '1'; } catch { return false; }
+  });
+  useEffect(() => {
+    try { localStorage.setItem('civitaiPost_hideMeta', hideMeta ? '1' : '0'); } catch { /* private mode */ }
+  }, [hideMeta]);
   const [job, setJob] = useState(null);
   const [submitting, setSubmitting] = useState(false);
 
@@ -256,7 +263,7 @@ export default function CivitaiPublishModal({ context, onClose }) {
     try {
       const d = await postJson(CIVITAI_API.publishImages, {
         image_ids: [target.imageId], link_id: postTarget.id,
-        title: postTitle.trim() || undefined, publish: publishNow,
+        title: postTitle.trim() || undefined, publish: publishNow, hide_meta: hideMeta,
       });
       setJob({ id: d.job_id, kind: 'post', state: 'running', phase: 'starting', progress: 0 });
     } catch (e) {
@@ -541,6 +548,12 @@ export default function CivitaiPublishModal({ context, onClose }) {
                 disabled={busy} data-testid="civitai-post-publish-now" />
               <span>Publish the post right away
                 <span className="text-xs text-content-subtle"> — untick to leave it as a draft on Civitai</span></span>
+            </label>
+            <label className="flex items-center gap-2 text-sm text-content">
+              <input type="checkbox" checked={hideMeta} onChange={(e) => setHideMeta(e.target.checked)}
+                disabled={busy} data-testid="civitai-post-hide-meta" />
+              <span>Hide the prompt and generation data
+                <span className="text-xs text-content-subtle"> — like Civitai&apos;s own hide option</span></span>
             </label>
             <div className="flex items-center justify-end gap-2">
               <button type="button" onClick={close} disabled={job?.state === 'running'} className={SECONDARY}>

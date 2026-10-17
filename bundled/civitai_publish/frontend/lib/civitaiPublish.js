@@ -157,6 +157,7 @@ export function jobPhaseLabel(job) {
   const pct = Math.round(Math.max(0, Math.min(1, Number(job.progress) || 0)) * 100);
   switch (job.phase) {
     case 'starting': return 'Starting…';
+    case 'identifying': return `Identifying the generation model… ${pct}%`;
     case 'creating': return job.kind === 'post' ? 'Creating the post…' : 'Creating the model page…';
     case 'uploading': return job.kind === 'post'
       ? `Uploading images… ${pct}%`
@@ -176,11 +177,18 @@ export function jobOutcome(job) {
   if (job.state !== 'done') return null;
   const r = job.result || {};
   if (job.kind === 'post') {
+    const tagged = Array.isArray(r.generation_models) ? r.generation_models : [];
+    const notes = [
+      tagged.length ? `The generation model is tagged too: ${tagged.join(', ')}.` : '',
+      r.generation_untagged ? 'The generation model was not found on Civitai, so it is not tagged.' : '',
+      r.hidden_meta ? 'Its generation data is hidden on Civitai.' : '',
+    ].filter(Boolean);
     return {
       ok: true,
-      text: r.published
+      text: [r.published
         ? `Posted ${r.count} image${r.count === 1 ? '' : 's'} on Civitai.`
         : `Draft post created with ${r.count} image${r.count === 1 ? '' : 's'} - finish it on Civitai.`,
+      ...notes].join(' '),
       url: r.url,
     };
   }

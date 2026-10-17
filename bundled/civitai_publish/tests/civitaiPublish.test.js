@@ -111,6 +111,19 @@ test('a finished job says what happened and where — draft vs published', () =>
   assert.deepEqual(failed, { ok: false, text: 'Civitai refused the API key', code: 'auth' });
 });
 
+test('a post says whether its generation model was tagged and its data hidden', () => {
+  assert.equal(jobPhaseLabel({ kind: 'post', phase: 'identifying', progress: 0.4 }),
+    'Identifying the generation model… 40%');
+  const tagged = jobOutcome({ state: 'done', kind: 'post', result: {
+    published: true, count: 1, url: 'https://civitai.com/posts/5',
+    generation_models: ['DesireX · Amateur (Hard)'], generation_untagged: 0, hidden_meta: true } });
+  assert.equal(tagged.text, 'Posted 1 image on Civitai. The generation model is tagged too: '
+    + 'DesireX · Amateur (Hard). Its generation data is hidden on Civitai.');
+  const unknown = jobOutcome({ state: 'done', kind: 'post', result: {
+    published: true, count: 1, generation_models: [], generation_untagged: 1 } });
+  assert.match(unknown.text, /not found on Civitai, so it is not tagged/);
+});
+
 test('every verb has ONE address', () => {
   assert.equal(CIVITAI_API.link(4, 2500), '/api/civitai/links/4/2500');
   // A pill names its file: two saves can share a step (the numbered one and the final).
