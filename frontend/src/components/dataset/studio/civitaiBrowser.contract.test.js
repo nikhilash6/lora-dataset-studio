@@ -68,6 +68,9 @@ test('the browse call carries the filters and the exact continuation', () => {
   assert.match(modal, /params\.set\('cursor', cont\.current\.cursor\)/);
   assert.match(modal, /params\.set\('skip', String\(cont\.current\.skip\)\)/);
   assert.match(modal, /require_prompt', '0'/);
+  // 🔗 A pasted model page link goes along, and the server names the page back.
+  assert.match(modal, /params\.set\('link', link\)/);
+  assert.match(modal, /setSource\(d\.source \|\| null\)/);
   // A re-walked page may overlap what is shown: append-only dedup by id.
   assert.match(modal, /filter\(\(c\) => !seen\.has\(c\.id\)\)/);
   assert.match(modal, /exhausted/);
@@ -76,7 +79,7 @@ test('the browse call carries the filters and the exact continuation', () => {
 test('filter choices persist under stable localStorage keys', () => {
   // These keys hold choices made in people's browsers — renaming one resets it.
   for (const key of ['civitaiBrowse_period', 'civitaiBrowse_sort',
-    'civitaiBrowse_level', 'civitaiBrowse_withPrompt']) {
+    'civitaiBrowse_level', 'civitaiBrowse_withPrompt', 'civitaiBrowse_link']) {
     assert.match(modal, new RegExp(key));
   }
   // Mild default: the content-level ceiling starts at Safe, never at X.

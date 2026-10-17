@@ -168,9 +168,11 @@ def studio_civitai_images():
     prompt, for the Studio/Canvas prompt field. Listing is public; prompts
     need the (free) Civitai API key — `has_key` tells the UI which story to
     show. Continuation is (`next_cursor`, `next_skip`) echoed back verbatim.
+    `link` = a Civitai model page link: that page's gallery instead, named by
+    `source` in the answer.
 
-    400 = bad filter value · 409 = Civitai unreachable / key refused (the
-    sentence carries the remedy)."""
+    400 = bad filter value or link · 409 = Civitai unreachable / key refused
+    (the sentence carries the remedy)."""
     from ..services import civitai_browser
     a = request.args
     try:
@@ -178,7 +180,8 @@ def studio_civitai_images():
             period=a.get('period', 'week'), sort=a.get('sort', 'reactions'),
             level=a.get('level', 'none'), cursor=a.get('cursor') or None,
             skip=a.get('skip', 0), want=a.get('want', 12),
-            require_prompt=a.get('require_prompt', '1') != '0')
+            require_prompt=a.get('require_prompt', '1') != '0',
+            link=a.get('link') or None)
     except Exception as e:
         return _map_error(e)
     return jsonify({'ok': True, **res})

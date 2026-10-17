@@ -91,6 +91,13 @@ export const WHATS_NEW = [
     to: '/datasets?section=add',
   },
   {
+    id: '2026-10-17-civitai-model-link-prompts',
+    date: '2026-10-17',
+    title: 'Grab the prompts of one Civitai model page',
+    blurb: 'Paste a Civitai model link (civitai.com or civitai.red) into the 🌐 Civitai browser to see the images of that page next to their prompts: the creator’s showcase and the whole gallery of that version. Use, copy or batch them like the top prompts.',
+    to: '/studio',
+  },
+  {
     id: '2026-10-13-qwen21-community-training-preset',
     date: '2026-10-13',
     title: 'Start Qwen-Image 2.1 character training from a community recipe',
