@@ -110,6 +110,29 @@ def civitai_link_create():
     return jsonify({'ok': True, 'link': cp.link_payload(link), 'page': page})
 
 
+@bp.post('/images/link')
+def civitai_link_image():
+    """"This LoRA's Civitai page", from the picture door: {image_id, url|model_id,
+    version_id?} → the picture's LoRA IS that version. A picture whose run is
+    not here is remembered by its deployed LoRA name (see link_image_to_page)."""
+    key = cp.api_key()
+    if not key:
+        return _fail(_NO_KEY)
+    d = request.get_json(silent=True)
+    if not isinstance(d, dict):
+        return jsonify({'ok': False, 'error': 'Expected a JSON object', 'error_code': 'invalid'}), 400
+    try:
+        image_id = int(d.get('image_id'))
+    except (TypeError, ValueError):
+        return jsonify({'ok': False, 'error': 'image_id is required'}), 400
+    try:
+        link, page = cp.link_image_to_page(image_id, d.get('url') or d.get('model_id'), key,
+                                           version_id=d.get('version_id'), user_id=LOCAL_USER)
+    except cp.CivitaiPublishError as e:
+        return _fail(e, _status_for(e.code))
+    return jsonify({'ok': True, 'link': cp.link_payload(link), 'page': page})
+
+
 @bp.post('/links/<int:link_id>/delete')
 def civitai_link_delete(link_id):
     """Forget the link (nothing on Civitai is touched — the page stays)."""

@@ -66,6 +66,14 @@ export default {
       ['civitai', 'civitai.red', 'domain', 'mirror', 'links', 'publish', 'open on', 'draft 404']),
   ]).map(guideHelp),
   whatsNew: [{
+    id: '2026-10-17-civitai-picture-lora-page',
+    date: '2026-10-17',
+    title: 'Post pictures whose training run is gone',
+    blurb: 'A picture whose run was removed, or that was made before runs were recorded, can now be '
+      + 'posted: paste its LoRA’s Civitai page in the post window and pick the version. The page is '
+      + 'remembered for the next pictures of that LoRA.',
+    to: '/gallery',
+  }, {
     id: '2026-10-17-civitai-post-generation-model',
     date: '2026-10-17',
     title: 'Civitai posts also tag the model they were generated with',

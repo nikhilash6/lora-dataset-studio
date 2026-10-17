@@ -814,14 +814,32 @@ def link_for(record_id, step, filename=None, hint=None):
     return _prefer(q.order_by(CivitaiLink.id.asc()).all(), stem=_clean_stem(hint) if hint else None)
 
 
+def deployed_lora_name(checkpoint) -> str:
+    """The file name a picture's LoRA was deployed under, without its folder."""
+    return re.split(r'[\\/]', str(checkpoint or '').strip())[-1]
+
+
+def _picture_link(dataset_id, name):
+    """The page a picture's LoRA was given from the picture door (its run not
+    here): one detached link per deployed name and dataset."""
+    from .models import CivitaiLink
+    if dataset_id is None or not name:
+        return None
+    return (CivitaiLink.query.filter_by(dataset_id=int(dataset_id), record_id=None, filename=name)
+            .order_by(CivitaiLink.id.desc()).first())
+
+
 def link_for_image(row):
     """The page a generated picture belongs to: the links of the checkpoint
     stamped on its row, the one whose file its deployed name was made from
-    first. None when the row carries no stamp — the caller then offers the
+    first. A row without a stamp finds the page its LoRA was given from a
+    picture (`link_image_to_page`), else None — the caller then offers the
     dataset's links, which is the ORDINARY path for a final save's pictures."""
-    if row is None or row.record_id is None or row.step is None:
+    if row is None:
         return None
-    return link_for(row.record_id, row.step, hint=row.checkpoint)
+    if row.record_id is not None and row.step is not None:
+        return link_for(row.record_id, row.step, hint=row.checkpoint)
+    return _picture_link(row.dataset_id, deployed_lora_name(row.checkpoint))
 
 
 def links_for_dataset(dataset_id) -> list:
@@ -850,16 +868,23 @@ def save_link(record_id, step, filename, dataset_id, *, model_id, version_id,
     `model_name` defaults to None, not '': the job-harvest guard
     (tests/test_dataset_job_harvest.py) reads every `model_name=<str>` default
     in this package as an engine stamping a job name, and '' read as an
-    engine the dispatch does not route. It is a Civitai page's name here."""
+    engine the dispatch does not route. It is a Civitai page's name here.
+
+    `record_id` None is a picture's LoRA whose run is not here: keyed by its
+    deployed name in its dataset (`_picture_link`)."""
     from .models import db
     from .models import CivitaiLink
     filename = str(filename or '')
-    row = (CivitaiLink.query.filter_by(record_id=int(record_id), step=int(step),
-                                       filename=filename).first())
+    if record_id is None:
+        row = _picture_link(dataset_id, filename)
+    else:
+        row = (CivitaiLink.query.filter_by(record_id=int(record_id), step=int(step),
+                                           filename=filename).first())
     if row is None:
-        row = CivitaiLink(record_id=int(record_id), step=int(step), filename=filename,
-                          dataset_id=int(dataset_id))
+        row = CivitaiLink(record_id=None if record_id is None else int(record_id),
+                          step=int(step), filename=filename, dataset_id=int(dataset_id))
         db.session.add(row)
+    row.step = int(step)
     row.dataset_id = int(dataset_id)
     row.model_id = int(model_id)
     row.version_id = int(version_id)
@@ -929,7 +954,12 @@ def link_checkpoint_to_page(record_id, step, ref, key, filename=None, version_id
     if not str(filename or '').strip():
         filename = resolve_save_filename(rec, step, hint) or ''
     page, url_version = lookup_model_page(ref, key)
-    wanted = version_id or url_version
+    return _link_to_version(record_id, step, filename, rec.dataset_id, page,
+                            version_id or url_version), page
+
+
+def _link_to_version(record_id, step, filename, dataset_id, page, wanted):
+    """Pick the version (the wanted one, else the newest) and remember it."""
     version = None
     if wanted:
         version = next((v for v in page['versions'] if v['id'] == int(wanted)), None)
@@ -939,11 +969,37 @@ def link_checkpoint_to_page(record_id, step, ref, key, filename=None, version_id
                               f'{_versions_line(page)}. Look the page up and pick one.')
     else:
         version = page['versions'][0]
-    link = save_link(record_id, step, filename, rec.dataset_id, model_id=page['id'],
+    return save_link(record_id, step, filename, dataset_id, model_id=page['id'],
                      version_id=version['id'], model_name=page['name'],
                      version_name=version['name'], base_model=version.get('base_model'),
                      published=(str(page.get('status') or '').lower() == 'published') or None)
-    return link, page
+
+
+def link_image_to_page(image_id, ref, key, version_id=None, user_id=LOCAL_USER):
+    """"This LoRA's Civitai page", from the picture door. A stamped picture
+    marks its run's save as usual; an unstamped one (its run removed, or made
+    before the stamp) is remembered by the deployed LoRA name it ran with, in
+    its dataset, so the next pictures of that LoRA find the page. Returns
+    (link, page)."""
+    from lds_sdk.gallery_exports import GalleryExports
+    try:
+        rows = GalleryExports(user_id).finished([int(image_id)])
+    except (TypeError, ValueError):
+        rows = ()
+    if not rows:
+        raise CivitaiPublishError('image_missing', 'This image is not finished or no longer on disk.')
+    row = rows[0]
+    if row.record_id is not None and row.step is not None:
+        return link_checkpoint_to_page(row.record_id, row.step, ref, key,
+                                       version_id=version_id, hint=row.checkpoint)
+    name = deployed_lora_name(row.checkpoint)
+    if not name:
+        raise CivitaiPublishError('invalid', 'This picture names no LoRA to link.')
+    page, url_version = lookup_model_page(ref, key)
+    block = _step_block(name)
+    step = row.step if row.step is not None else (int(block) if block else 0)
+    return _link_to_version(None, step, name, row.dataset_id, page,
+                            version_id or url_version), page
 
 
 # --- the model page (a new one, from a checkpoint) ------------------------------

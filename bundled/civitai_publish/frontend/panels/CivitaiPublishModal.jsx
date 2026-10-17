@@ -5,7 +5,7 @@ import { useFocusTrap } from '@lds/plugin-sdk/ui';
 import { checkpointFileLabel } from '@lds/plugin-sdk/data';
 import {
   CIVITAI_API, CIVITAI_POLL_MS, civitaiLinkLine, civitaiTarget, civitaiTargetKnown,
-  draftFormFrom, draftFormRefusal, jobOutcome, jobPhaseLabel, pageVersionOptions,
+  deployedLoraName, draftFormFrom, draftFormRefusal, jobOutcome, jobPhaseLabel, pageVersionOptions,
   preselectVersion,
 } from '../lib/civitaiPublish.js';
 
@@ -143,7 +143,15 @@ export default function CivitaiPublishModal({ context, onClose }) {
     }
     if (isImage && target?.datasetId != null) {
       apiFetch(CIVITAI_API.datasetLinks(target.datasetId))
-        .then((d) => { if (alive) setDatasetLinks(d.links || []); })
+        .then((d) => {
+          if (!alive) return;
+          setDatasetLinks(d.links || []);
+          // A picture without a stamp finds the page its LoRA was given here before.
+          const name = deployedLoraName(target.checkpoint);
+          const own = !known && name
+            && (d.links || []).find((l) => l.record_id == null && l.filename === name);
+          if (own) setLink(own);
+        })
         .catch(() => { /* the picker simply stays empty */ });
     }
     return () => { alive = false; };
@@ -204,16 +212,22 @@ export default function CivitaiPublishModal({ context, onClose }) {
   };
 
   const markPage = async () => {
-    if (!known || !page || versionId == null || linking) return;
+    if (!(known || isImage) || !page || versionId == null || linking) return;
     setLinking(true); setLinkError(null);
     try {
-      const d = await postJson(CIVITAI_API.createLink, {
-        record_id: target.recordId, step: target.step, filename: target.filename,
-        checkpoint: target.checkpoint, url: String(page.id), version_id: versionId,
-      });
+      // A picture without a stamp links its LoRA by the name it was deployed under.
+      const d = known
+        ? await postJson(CIVITAI_API.createLink, {
+          record_id: target.recordId, step: target.step, filename: target.filename,
+          checkpoint: target.checkpoint, url: String(page.id), version_id: versionId,
+        })
+        : await postJson(CIVITAI_API.linkImage, {
+          image_id: target.imageId, url: String(page.id), version_id: versionId,
+        });
       setLink(d.link);
       setPage(null);
-      toast.success(`Checkpoint linked to ${civitaiLinkLine(d.link)}`);
+      if (!known) setDatasetLinks((cur) => [d.link, ...cur.filter((l) => l.id !== d.link.id)]);
+      toast.success(`${known ? 'Checkpoint' : 'LoRA'} linked to ${civitaiLinkLine(d.link)}`);
     } catch (e) {
       setLinkError(e?.message || 'Could not link this page.');
     } finally {
@@ -284,6 +298,48 @@ export default function CivitaiPublishModal({ context, onClose }) {
     ? `${checkpointFileLabel(img?.checkpoint) || 'this checkpoint'}${img?.step != null ? ` · step ${img.step}` : ''}`
     : `${context?.node?.dataset_name || 'this run'}${target?.step != null ? ` · step ${target.step}` : ''}`;
 
+  // Paste a page, look it up, pick the version: the checkpoint's "mark" pane,
+  // and the LoRA of a picture whose run is not here.
+  const markPane = (intro, versionLabel) => (
+    <div className="flex flex-col gap-1.5">
+      <p className="m-0 text-xs text-content-muted">{intro}</p>
+      <div className="flex gap-2">
+        <input value={ref} onChange={(e) => { setRef(e.target.value); setPage(null); }}
+          disabled={busy || noKey || lookingUp}
+          placeholder="https://civitai.com/models/12345/my-lora" className={`${FIELD} font-mono`}
+          data-testid="civitai-ref" />
+        <button type="button" onClick={lookUp} disabled={busy || noKey || lookingUp || !ref.trim()}
+          className={PRIMARY} data-testid="civitai-lookup">
+          {lookingUp && <Spinner />} Look up
+        </button>
+      </div>
+      {page && (
+        <div className="flex flex-col gap-1.5 rounded-md border border-border bg-surface-raised p-2"
+          data-testid="civitai-page">
+          <p className="m-0 text-sm text-content">
+            <strong>{page.name}</strong>
+            <span className="text-xs text-content-muted"> · {page.type || 'model'}
+              {page.nsfw ? ' · mature' : ''} · {page.versions.length} version{page.versions.length === 1 ? '' : 's'}</span>
+          </p>
+          <label className="flex flex-col gap-0.5">
+            <span className={LABEL}>{versionLabel}</span>
+            <select value={versionId ?? ''} onChange={(e) => setVersionId(Number(e.target.value))}
+              disabled={busy} className={FIELD} data-testid="civitai-version">
+              {pageVersionOptions(page).map((o) => <option key={o.id} value={o.id}>{o.label}</option>)}
+            </select>
+          </label>
+          <div className="flex justify-end">
+            <button type="button" onClick={markPage} disabled={busy || noKey || versionId == null}
+              className={PRIMARY} data-testid="civitai-link">
+              {linking && <Spinner />} Link this version
+            </button>
+          </div>
+        </div>
+      )}
+      {linkError && <p role="alert" className="m-0 text-xs text-rose-300">{linkError}</p>}
+    </div>
+  );
+
   return (
     <div ref={dialogRef} data-probe-layer data-testid="civitai-publish-modal"
       role="dialog" aria-modal="true" aria-label="Publish to Civitai"
@@ -343,11 +399,12 @@ export default function CivitaiPublishModal({ context, onClose }) {
                 className="ml-auto text-xs text-content-subtle underline hover:text-rose-300">Unlink</button>
             </div>
           ) : !known ? (
-            <p className="m-0 text-sm text-content-muted">
-              This picture carries no checkpoint stamp — it was made with a run&apos;s <em>final</em> save
-              (whose deployed name has no step), with a run that was since removed, or before the stamp
-              existed — so pick one of this dataset&apos;s linked checkpoints below.
-            </p>
+            markPane(
+              <>This picture is not tied to a training run here (its run was removed, or it was made with a
+                final save or before the stamp existed). Paste its LoRA&apos;s Civitai page and look it up; the
+                page is remembered for the next pictures of this LoRA. You can also pick one of this
+                dataset&apos;s linked checkpoints below.</>,
+              'This LoRA is version')
           ) : (
             <>
               <div className="flex gap-1.5">
@@ -359,49 +416,11 @@ export default function CivitaiPublishModal({ context, onClose }) {
                   Create the page from this checkpoint
                 </button>
               </div>
-              {pane === 'mark' ? (
-                <div className="flex flex-col gap-1.5">
-                  <p className="m-0 text-xs text-content-muted">
-                    Paste the address of the LoRA&apos;s page on Civitai and look it up; then pick which of its
-                    versions this checkpoint is (the address&apos;s <code>?modelVersionId=</code> is preselected
-                    when it has one). The checkpoint is remembered as that version.
-                  </p>
-                  <div className="flex gap-2">
-                    <input value={ref} onChange={(e) => { setRef(e.target.value); setPage(null); }}
-                      disabled={busy || noKey || lookingUp}
-                      placeholder="https://civitai.com/models/12345/my-lora" className={`${FIELD} font-mono`}
-                      data-testid="civitai-ref" />
-                    <button type="button" onClick={lookUp} disabled={busy || noKey || lookingUp || !ref.trim()}
-                      className={PRIMARY} data-testid="civitai-lookup">
-                      {lookingUp && <Spinner />} Look up
-                    </button>
-                  </div>
-                  {page && (
-                    <div className="flex flex-col gap-1.5 rounded-md border border-border bg-surface-raised p-2"
-                      data-testid="civitai-page">
-                      <p className="m-0 text-sm text-content">
-                        <strong>{page.name}</strong>
-                        <span className="text-xs text-content-muted"> · {page.type || 'model'}
-                          {page.nsfw ? ' · mature' : ''} · {page.versions.length} version{page.versions.length === 1 ? '' : 's'}</span>
-                      </p>
-                      <label className="flex flex-col gap-0.5">
-                        <span className={LABEL}>This checkpoint is version</span>
-                        <select value={versionId ?? ''} onChange={(e) => setVersionId(Number(e.target.value))}
-                          disabled={busy} className={FIELD} data-testid="civitai-version">
-                          {pageVersionOptions(page).map((o) => <option key={o.id} value={o.id}>{o.label}</option>)}
-                        </select>
-                      </label>
-                      <div className="flex justify-end">
-                        <button type="button" onClick={markPage} disabled={busy || noKey || versionId == null}
-                          className={PRIMARY} data-testid="civitai-link">
-                          {linking && <Spinner />} Link this version
-                        </button>
-                      </div>
-                    </div>
-                  )}
-                  {linkError && <p role="alert" className="m-0 text-xs text-rose-300">{linkError}</p>}
-                </div>
-              ) : (
+              {pane === 'mark' ? markPane(
+                <>Paste the address of the LoRA&apos;s page on Civitai and look it up; then pick which of its
+                  versions this checkpoint is (the address&apos;s <code>?modelVersionId=</code> is preselected
+                  when it has one). The checkpoint is remembered as that version.</>,
+                'This checkpoint is version') : (
                 <div className="flex flex-col gap-2" data-testid="civitai-create-form">
                   {defaultsError ? (
                     <p role="alert" className="m-0 text-sm text-rose-300">{defaultsError}</p>
@@ -525,12 +544,6 @@ export default function CivitaiPublishModal({ context, onClose }) {
                 ))}
               </select>
             </label>
-          )}
-          {isImage && !link && !known && datasetLinks.length === 0 && (
-            <p className="m-0 text-xs text-amber-200">
-              No checkpoint of this dataset is linked to Civitai yet. Open the checkpoint&apos;s pill on the
-              ◉ Canvas or the run graph and use 📤 Civitai there first.
-            </p>
           )}
         </section>
 

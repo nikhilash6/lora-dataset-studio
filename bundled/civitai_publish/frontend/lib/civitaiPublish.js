@@ -35,8 +35,14 @@ export const CIVITAI_API = {
     `/api/civitai/checkpoint/${recordId}/${step}/draft-defaults${saveQuery(filename, checkpoint)}`,
   publishModel: (recordId, step) => `/api/civitai/checkpoint/${recordId}/${step}/publish-model`,
   publishImages: '/api/civitai/images/publish',
+  linkImage: '/api/civitai/images/link',
   job: (id) => `/api/civitai/jobs/${id}`,
 };
+
+/** The file name a picture's LoRA was deployed under, without its folder —
+ *  what a picture whose run is not here is linked by. */
+export const deployedLoraName = (checkpoint) =>
+  String(checkpoint || '').trim().split(/[\\/]/).pop();
 
 /**
  * The save a modal context is about. The viewer's row carries the checkpoint

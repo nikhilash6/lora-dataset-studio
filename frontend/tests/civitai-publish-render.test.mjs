@@ -65,13 +65,15 @@ test('the image door renders: thumbnail, the page section, the post section', as
   assert.match(html, /Looking up the link/, 'the link is being resolved on open')
 })
 
-test('a legacy picture without a checkpoint stamp is told so, never guessed', async () => {
+test('a picture without a run is told so and offered its LoRA page, never guessed', async () => {
   const html = await inApp(createElement(CivitaiPublishModal, {
     context: { kind: 'image', img: row({ record_id: null, step: null }) }, onClose: () => {},
   }))
-  assert.match(html, /carries no checkpoint stamp/)
-  assert.match(html, /No checkpoint of this dataset is linked/)
-  assert.doesNotMatch(html, /data-testid="civitai-ref"/, 'no address field: there is no checkpoint to mark')
+  assert.match(html, /not tied to a training run here/)
+  assert.match(html, /remembered for the next pictures of this LoRA/)
+  // The page is pasted by the user and looked up before anything is linked.
+  assert.match(html, /data-testid="civitai-ref"/, 'the LoRA page is pasted here')
+  assert.doesNotMatch(html, /Open the checkpoint&#x27;s pill/, 'no detour through a run that is not here')
 })
 
 test('the checkpoint door renders the mark / create tabs and no post section', async () => {

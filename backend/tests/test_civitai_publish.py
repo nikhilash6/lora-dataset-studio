@@ -798,6 +798,54 @@ def test_the_generation_model_is_tagged_when_civitai_hosts_its_file(client, app,
         assert len(cp.image_meta(row, None, link, 8, 8, same)['civitaiResources']) == 1
 
 
+KITTY = 'krea\\lora_kitty_uc_000002000_Krea-2-Raw_rc17_v2.safetensors'
+
+
+def _lora_page(*_a, **_k):
+    return {'id': 2798716, 'name': 'Kitty', 'type': 'LORA', 'status': 'Published',
+            'versions': [{'id': 31, 'name': 'v2'}, {'id': 30, 'name': 'v1'}]}
+
+
+@pytest.mark.plugins('civitai_publish')
+def test_a_picture_without_a_run_links_its_lora_by_its_deployed_name(client, app, civitai, monkeypatch):
+    from app.extensions import db
+    from lds_civitai_publish.models import CivitaiLink
+    with app.app_context():
+        ds_id = _create(client)
+        row = _image(db, ds_id, None, filename='k1.png', checkpoint=KITTY)
+        assert cp.link_for_image(row) is None
+        monkeypatch.setattr(cp, 'fetch_model_page', _lora_page)
+        link, _page = cp.link_image_to_page(row.id, 'https://civitai.red/models/2798716/kitty', KEY)
+        assert (link.record_id, link.step, link.dataset_id) == (None, 2000, ds_id)
+        assert link.filename == 'lora_kitty_uc_000002000_Krea-2-Raw_rc17_v2.safetensors'
+        assert link.version_id == 31          # the newest, as the address names none
+        # The next picture of the same LoRA finds the page by itself…
+        other = _image(db, ds_id, None, filename='k2.png', checkpoint=KITTY)
+        assert cp.link_for_image(other).id == link.id
+        # …and linking again retargets the same row instead of adding one.
+        again, _page = cp.link_image_to_page(other.id, '2798716', KEY, version_id=30)
+        assert again.id == link.id and again.version_id == 30
+        assert CivitaiLink.query.filter_by(dataset_id=ds_id).count() == 1
+        # Another LoRA of the dataset is never given that page.
+        assert cp.link_for_image(_image(db, ds_id, None, filename='n.png')) is None
+
+
+@pytest.mark.plugins('civitai_publish')
+def test_the_picture_door_links_its_lora_through_its_own_route(client, app, civitai, monkeypatch):
+    from app.extensions import db
+    with app.app_context():
+        ds_id = _create(client)
+        row = _image(db, ds_id, None, filename='k1.png', checkpoint=KITTY)
+        monkeypatch.setattr(cp, 'fetch_model_page', _lora_page)
+        r = client.post('/api/civitai/images/link', json={'image_id': row.id, 'url': '2798716'})
+        assert r.status_code == 200
+        link = r.get_json()['link']
+        assert link['record_id'] is None and link['version_id'] == 31
+        assert link['filename'] == 'lora_kitty_uc_000002000_Krea-2-Raw_rc17_v2.safetensors'
+        assert client.post('/api/civitai/images/link', json={'url': '2798716'}).status_code == 400
+        assert client.post('/api/civitai/images/link', json=['bad']).status_code == 400
+
+
 @pytest.mark.plugins('civitai_publish')
 def test_hidden_generation_data_uses_civitais_own_toggle_before_the_publish(client, app, civitai,
                                                                              monkeypatch):

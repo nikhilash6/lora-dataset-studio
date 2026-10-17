@@ -2,8 +2,16 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   CIVITAI_API, civitaiLinkLine, civitaiTarget, civitaiTargetKnown, civitaiVerbRefusal,
-  draftFormFrom, draftFormRefusal, jobOutcome, jobPhaseLabel, pageVersionOptions, preselectVersion,
+  deployedLoraName, draftFormFrom, draftFormRefusal, jobOutcome, jobPhaseLabel, pageVersionOptions, preselectVersion,
 } from '../frontend/lib/civitaiPublish.js';
+
+test('a picture without a run is linked by the file name its LoRA was deployed under', () => {
+  assert.equal(deployedLoraName('krea\\lora_kitty_uc_000002000_Krea-2-Raw_rc17_v2.safetensors'),
+    'lora_kitty_uc_000002000_Krea-2-Raw_rc17_v2.safetensors');
+  assert.equal(deployedLoraName('a/b/c.safetensors'), 'c.safetensors');
+  assert.equal(deployedLoraName(null), '');
+  assert.equal(CIVITAI_API.linkImage, '/api/civitai/images/link');
+});
 
 test('a looked-up page becomes a version pick: the address\'s version first, else the newest', () => {
   const page = { versions: [
