@@ -28,7 +28,7 @@ export default function SupportProjectNotice() {
       className="flex items-start gap-3 rounded-lg border border-border bg-surface-raised px-4 py-3">
       <Heart aria-hidden="true" className="mt-0.5 h-4 w-4 shrink-0 text-content-muted" />
       <div className="min-w-0 flex-1">
-        <p className="text-sm font-medium text-content">LDS updates now come through Patreon</p>
+        <p className="text-sm font-medium text-content">New LDS versions reach Patreon members first</p>
         <p className="mt-0.5 text-xs leading-relaxed text-content-muted">
           {PATREON_ACCESS_SUMMARY}
         </p>

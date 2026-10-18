@@ -4,8 +4,8 @@
 
 export const PATREON_AUTHORIZE_PREFIX = 'https://www.patreon.com/oauth2/authorize?';
 
-export const PATREON_ACCESS_SUMMARY = 'New features, exclusive plugins and LDS updates are reserved for '
-  + 'Patreon members (LDS Member). The version you have stays free and keeps working.';
+export const PATREON_ACCESS_SUMMARY = 'New LDS versions reach Patreon members (LDS Member) first, then everyone, '
+  + 'and exclusive plugins stay members-only. The version you have stays free and keeps working.';
 
 // Patreon offers no lookup by user: a linked non-member becomes active through
 // the creator's webhook, or by connecting again.

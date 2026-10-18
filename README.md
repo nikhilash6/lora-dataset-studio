@@ -10,7 +10,7 @@ Build, curate, caption and train image datasets from one browser interface. LDS 
 [Install](#setup--install) · [Documentation](docs/README.md) · [Plugins](#plugins) · [Releases](https://github.com/perfectgf/lora-dataset-studio/releases) · [Discord](https://discord.gg/j6hnJBFtXE)
 
 > [!IMPORTANT]
-> **LDS updates now come through Patreon.** New features, exclusive plugins and LDS updates are reserved for [Patreon](https://www.patreon.com/c/Loraperfectgf) members (**LDS Member**). The version you have stays free and keeps working.
+> **New LDS versions reach Patreon members first.** Each new version is available early to [Patreon](https://www.patreon.com/c/Loraperfectgf) members (**LDS Member**), then to everyone; exclusive plugins stay members-only. The version you have stays free and keeps working.
 
 The current core and public plugins are free under the [PolyForm Noncommercial license](LICENSE), and running them needs no account; optional usage statistics are off by default. External APIs and rented GPUs have their own charges. A Patreon membership is needed for new versions and exclusive plugins, not to keep using the version you have.
 
@@ -105,7 +105,7 @@ Complete **Setup**, then create a dataset or install the plugins you need. Impor
 | Pinokio | [One-click installation](docs/guide/installation.md#pinokio) |
 | Rented RunPod GPU | [RunPod guide](docs/guide/runpod.md) |
 
-**Updates:** new LDS versions are reserved for Patreon members and install from **Settings → Maintenance → Updates**. Git and Pinokio checkouts fast-forward to a verified release; ZIP installations swap in a verified archive and retain their datasets, media, settings and history. Docker installations from the Windows ZIP install them from the host with `update-docker.bat patreon`. Without a membership, the installed version keeps working; `v1` is frozen and old `main` installations must [migrate to V2](docs/guide/migrate-to-v2.md). Pinokio and Docker keep their own [update procedures](docs/guide/installation.md).
+**Updates:** new LDS versions reach Patreon members first, then everyone, and install from **Settings → Maintenance → Updates**. Git and Pinokio checkouts fast-forward to a verified release; ZIP installations swap in a verified archive and retain their datasets, media, settings and history. Docker installations from the Windows ZIP install them from the host with `update-docker.bat patreon`. Without a membership, the installed version keeps working; `v1` is frozen and old `main` installations must [migrate to V2](docs/guide/migrate-to-v2.md). Pinokio and Docker keep their own [update procedures](docs/guide/installation.md).
 
 ### Minimum requirements
 

@@ -76,7 +76,7 @@ test('the Patreon block of the Updates card renders each channel state', () => {
     /Docker limit\./)
   assert.match(render(PatreonUpdates, { patreon: null, installed: { version: '2026.10.20', install_mode: 'pinokio' } }),
     /Click the Update tab/)
-  assert.match(render(PatreonUpdates, { patreon: { status: 'not_configured' } }), /reserved for Patreon members/)
+  assert.match(render(PatreonUpdates, { patreon: { status: 'not_configured' } }), /reach Patreon members \(LDS Member\) first, then everyone/)
 })
 
 test('the Docker host command names its scope and asks to stop running work first', () => {
@@ -123,8 +123,8 @@ test('a Patreon product is labelled and promises no screenshots', () => {
 
 test('the announcement names the LDS Member tier and no price', () => {
   const html = render(() => createElement(MemoryRouter, null, createElement(SupportProjectNotice)))
-  assert.match(html, /LDS updates now come through Patreon/)
-  assert.match(html, /Patreon members \(LDS Member\)\./)
+  assert.match(html, /New LDS versions reach Patreon members first/)
+  assert.match(html, /Patreon members \(LDS Member\) first, then everyone/)
   assert.doesNotMatch(html, /LDS Pro|custom plugin/i)
   assert.match(html, /href="\/plugins\?tab=purchases"/)
   assert.doesNotMatch(html, /[$€£]/)
