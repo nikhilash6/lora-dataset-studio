@@ -47,11 +47,11 @@ test('the multi-LoRA panel really mounts the pickers — the same component', ()
 test('the pickers survive Blend, where the strength axis does NOT', () => {
   // The reported bug covered BOTH modes. Blend drops the strength sweep because
   // each LoRA carries its weight — steps are a render setting and must stay.
-  const strengthAt = SETUP.indexOf('{!combine && (')
+  const strengthAt = SETUP.indexOf('{!baseOnly && !combine && (')
   const slotAt = SETUP.indexOf('{axisSlot}')
   assert.ok(strengthAt > 0 && slotAt > strengthAt)
   // …and the slot is NOT wrapped in the same `!combine` guard.
-  assert.doesNotMatch(SETUP, /\{!combine && \(\s*\{axisSlot\}/)
+  assert.doesNotMatch(SETUP, /\{!baseOnly && !combine && \(\s*\{axisSlot\}/)
 })
 
 test('what is ticked really reaches the request body', () => {

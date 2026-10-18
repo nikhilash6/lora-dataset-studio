@@ -8,8 +8,6 @@ const PORTABLE_RELEASES = 'https://github.com/Comfy-Org/ComfyUI/releases/latest'
 const MODEL_PATHS = 'https://docs.comfy.org/installation/comfyui_portable_windows#adding-extra-model-paths';
 const buttonClass = 'min-h-10 rounded-md border border-border px-3 py-1.5 text-xs text-content hover:bg-surface-raised disabled:opacity-50';
 const linkClass = 'break-words text-xs text-content underline';
-// Only reviewed optional packs get an installer here.
-const NODE_INSTALL_ACTIONS = new Set(['moss_nodes']);
 
 export function safeComfyLink(value) {
   if (typeof value !== 'string' || !/^https?:\/\//i.test(value.trim())
@@ -126,9 +124,9 @@ export default function ComfyNodeRepair({ nodes = [], nodePacks = [], onRefresh 
           {installGroups.map((pack) => (
             <div key={pack.class_type} className="space-y-1">
               <p><code className="break-all">{pack.class_type}</code> needs <b>{pack.pack}</b>.</p>
-              {NODE_INSTALL_ACTIONS.has(pack.install_action) ? (
+              {pack.install_action === 'moss_nodes' ? (
                 <>
-                  <InstallRunner action={pack.install_action} buttonLabel={`Install ${pack.pack}`} onDone={onRefresh} />
+                  <InstallRunner action="moss_nodes" buttonLabel={`Install ${pack.pack}`} onDone={onRefresh} />
                   <p>Let running and queued jobs finish, restart ComfyUI, then use “Check nodes again”.
                     {' MOSS uses the bundled LDS loaders and requires ComfyUI with Qwen3.5 support.'}</p>
                 </>

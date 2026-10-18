@@ -124,7 +124,7 @@ that cost hours of GPU is recoverable.
 **☁ on Hugging Face** on the board and in its card, and the app refuses to remove
 it: doing so would discard the only record of where that model is.
 
-### Testing a full model
+## Testing a full model
 
 Once the fp8 twin is in ComfyUI, the **Test Studio** lists it as a base and
 **🧪 Test in Studio** opens straight onto it, with its own sample settings filled
