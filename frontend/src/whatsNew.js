@@ -84,6 +84,11 @@ import { SETUP_DEEP_LINK_STEPS } from './hooks/useSetupSteps.js';
 // Newest first. Prepend new waves at the top.
 export const WHATS_NEW = [
   {
+    id: '2026-10-18-z-docker-restart-port', date: '2026-10-18',
+    title: 'Docker: LDS stays reachable after installing a plugin',
+    blurb: 'On the Docker GPU installation, Apply and restart could bring LDS back on a port Docker does not publish, which left the app unreachable. LDS now always restarts on its published port.',
+  },
+  {
     id: '2026-10-18-studio-moss-image', date: '2026-10-18',
     title: 'Create with MOSS-Image in Test Studio',
     blurb: 'Choose Base model only, then MOSS-Image. Existing model files are reused; missing files and the MOSS loaders can be prepared from the Studio.',
