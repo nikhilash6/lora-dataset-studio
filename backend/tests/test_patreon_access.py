@@ -82,16 +82,18 @@ def write_config(tmp_path, monkeypatch, **over):
 
 # --- Configuration -------------------------------------------------------------
 
-def test_shipped_configuration_waits_for_the_real_service(monkeypatch):
+def test_shipped_configuration_points_to_the_real_service(monkeypatch):
     monkeypatch.delenv(patreon.CONFIG_ENV, raising=False)
     shipped = json.loads((patreon.cfg.REPO_ROOT / 'store' / 'patreon.json').read_text(encoding='utf-8'))
-    assert shipped['service_url'] == 'https://store.example.invalid'
+    assert shipped['service_url'] == 'https://lds.perfectgf.fr'
     assert shipped['checkout_origin'] == 'https://www.patreon.com'
     # Installations that stop updating keep this file: later members-only
     # plugins reach them only through the namespace it ships.
     assert shipped['catalog']['plugin_namespaces'] == ['patreon']
-    with pytest.raises(StoreNotConfigured):
-        patreon.load_patreon_config()
+    assert 'local.creative_library' in shipped['catalog']['plugin_ids']
+    loaded = patreon.load_patreon_config()
+    assert loaded.service_url == 'https://lds.perfectgf.fr'
+    assert json.loads(loaded.root)['signed']['_type'] == 'root'
 
 
 @pytest.mark.parametrize('url,ok', [('http://127.0.0.1:8765', True), ('https://store.example.test', True),
@@ -399,8 +401,8 @@ def test_confirm_route_requires_admin_and_csrf_and_names_the_refusal(remote):
     assert remote[1][-1][2]['json'] == {'code': 'ABCD2345'}
 
 
-def test_route_reports_not_configured_on_the_shipped_placeholder(client, monkeypatch):
-    monkeypatch.delenv(patreon.CONFIG_ENV, raising=False)
+def test_route_reports_not_configured_on_a_placeholder_service(client, tmp_path, monkeypatch):
+    write_config(tmp_path, monkeypatch, service_url='https://store.example.invalid')
     response = client.get('/api/plugins/store/patreon')
     assert response.status_code == 200 and response.json['status'] == 'not_configured'
 
