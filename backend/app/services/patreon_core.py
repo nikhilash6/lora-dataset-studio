@@ -75,7 +75,8 @@ DOCKER_HOST_COMMAND = 'update-docker.bat patreon'
 DOCKER_HOST_UPDATE = ('LDS cannot update itself inside Docker. For an LDS installation from the Windows ZIP, '
                       f'stop running work first, then run {DOCKER_HOST_COMMAND} in the LDS folder on the '
                       'computer that runs Docker.')
-PATREON_REQUIRED = 'This update is available to Patreon members. Connect Patreon or join, then check again.'
+PATREON_REQUIRED = ('This update is available to Patreon members first. Connect Patreon or join, '
+                    'then check again.')
 AHEAD_OF_RELEASE = ('This installation is ahead of the members release: it already has public changes that '
                     'release does not include. Wait for the next Patreon release; your installed version keeps '
                     'working.')

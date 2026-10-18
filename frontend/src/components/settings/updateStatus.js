@@ -133,7 +133,7 @@ export function patreonUpdateView(p) {
       ? { kind: 'current', text: `Up to date on the Patreon channel${p.release?.version ? ` (v${p.release.version})` : ''}.` }
       : { kind: 'none' }
   }
-  if (p.blocked_reason) return { kind: 'blocked', text: `${version} is available to Patreon members.`, reason: p.blocked_reason }
+  if (p.blocked_reason) return { kind: 'blocked', text: `${version} is available to Patreon members first.`, reason: p.blocked_reason }
   if (p.can_apply && p.can_manage === false) {
     return { kind: 'blocked', text: `${version} is available with your Patreon membership.`, reason: PATREON_ADMIN_REASON }
   }
@@ -142,11 +142,11 @@ export function patreonUpdateView(p) {
     return { kind: 'host', text: `${version} is available with your Patreon membership.`, command: p.host_command }
   }
   if (p.access?.patreon?.status === 'verification_required') {
-    return { kind: 'blocked', text: `${version} is available to Patreon members.`,
+    return { kind: 'blocked', text: `${version} is available to Patreon members first.`,
       reason: 'Patreon could not verify your membership right now. Check again in a few minutes.' }
   }
-  if (!p.entitled) return { kind: 'join', text: `${version} is available to Patreon members (LDS Member).` }
-  return { kind: 'blocked', text: `${version} is available to Patreon members.`,
+  if (!p.entitled) return { kind: 'join', text: `${version} is available to Patreon members (LDS Member) first.` }
+  return { kind: 'blocked', text: `${version} is available to Patreon members first.`,
     reason: 'This installation cannot apply it right now. Check again later.' }
 }
 

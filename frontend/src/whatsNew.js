@@ -86,8 +86,8 @@ export const WHATS_NEW = [
   {
     id: '2026-10-05-patreon-access',
     date: '2026-10-05',
-    title: 'LDS updates and exclusive plugins on Patreon',
-    blurb: 'New features, exclusive plugins and LDS updates are now reserved for Patreon members (LDS Member). The version you have stays free and keeps working. Connect Patreon under Plugins → Purchases to install members-only plugins, and update LDS from Settings → Maintenance.',
+    title: 'Early LDS versions and exclusive plugins on Patreon',
+    blurb: 'New LDS versions now reach Patreon members (LDS Member) first, then everyone, and some plugins are members-only. The version you have stays free and keeps working. Connect Patreon under Plugins → Purchases to install members-only plugins, and update LDS from Settings → Maintenance.',
     to: '/plugins?tab=purchases',
   },
   {
