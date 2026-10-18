@@ -9,8 +9,12 @@ from test_studio_prompt_batch import _neutralise_preflights
 
 def test_every_trainable_image_family_has_a_generation_lane():
     from app.services.face_dataset_service import TRAIN_TYPES
-    assert set(studio.GENERATION_FAMILIES) == set(TRAIN_TYPES)
+    assert set(TRAIN_TYPES) <= set(studio.GENERATION_FAMILIES)
     assert all(studio.can_generate_with(family) for family in TRAIN_TYPES)
+    # The only lanes beyond the trained families are managed base-only ones:
+    # MOSS-Image renders from its base model where this build cannot train it.
+    base_only = set(studio.GENERATION_FAMILIES) - set(TRAIN_TYPES)
+    assert base_only <= set(studio.MANAGED_IMAGE_FAMILIES) - set(studio.TRAINED_IMAGE_FAMILIES)
 
 
 def _install_family(monkeypatch, family):

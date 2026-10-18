@@ -19,9 +19,17 @@ import pytest
 from app.services import lora_test_studio as studio
 
 
+def _lora_generation_families():
+    """Generation families that also train here. The others (MOSS-Image on a
+    build without its training lane) render from their base model only: there is
+    no LoRA of theirs to see or to pick."""
+    from app.services.face_dataset_service import TRAIN_TYPES
+    return set(studio.GENERATION_FAMILIES) & set(TRAIN_TYPES)
+
+
 def test_generation_families_are_a_subset_of_visible_families():
-    """You cannot generate with a family the studio cannot even see."""
-    assert set(studio.GENERATION_FAMILIES) <= set(studio.FAMILIES)
+    """You cannot generate with a LoRA of a family the studio cannot even see."""
+    assert _lora_generation_families() <= set(studio.FAMILIES)
 
 
 def test_every_generation_family_has_a_workflow_on_disk():
@@ -68,7 +76,7 @@ def test_the_picker_does_not_offer_a_family_it_cannot_serve(monkeypatch):
     monkeypatch.setattr(studio, 'list_test_checkpoints',
                         lambda ds, fam: [{'filename': f'{fam}/x.safetensors'}])
     fams = [f['family'] for f in studio.available_families(object())]
-    assert set(fams) == set(studio.GENERATION_FAMILIES)
+    assert set(fams) == _lora_generation_families()
 
 
 def test_the_workflow_builder_refuses_rather_than_borrowing_z_image():
