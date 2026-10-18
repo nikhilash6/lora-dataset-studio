@@ -1,12 +1,98 @@
 {
   "format": "lds-patreon/1",
-  "service_url": "https://store.example.invalid",
+  "service_url": "https://lds.perfectgf.fr",
   "checkout_origin": "https://www.patreon.com",
   "join_url": "https://www.patreon.com/c/Loraperfectgf",
   "catalog": {
-    "root": null,
+    "root": {
+      "signatures": [
+        {
+          "keyid": "3ffc904c210a38caee0af8196909d6609d158f6c22b782906093cfc441b8a773",
+          "sig": "eb0260e628c7dbe730b64231fd99aa984eabab12295eaedc7cb8faf4d73c912a3e64840e8121eb3c08a7bddf99c334795191ea262f6931d58421aa444756ad00"
+        },
+        {
+          "keyid": "e5f9657e0d66f86a4bc55eb280b54335ec8b4a93b70d948427c4f0aae9e7face",
+          "sig": "54f946ec53d697268c53bd42671961e57f031148ec97aee4e402a8b495e8e669a8514334713632dbd1c698190cf81308af8c733a350b7f8b7635eb3e1c05d90f"
+        }
+      ],
+      "signed": {
+        "_type": "root",
+        "consistent_snapshot": true,
+        "expires": "2027-10-11T10:05:49Z",
+        "keys": {
+          "0f32d28245ffb658841bb56fb0b70b0cd1b8c638b1172b7e25e9b480b974d42e": {
+            "keytype": "ed25519",
+            "keyval": {
+              "public": "da1ba66c93a2de066d1e5e46e73d769d4f2454938ca077ad953eaa8b5555b6a9"
+            },
+            "scheme": "ed25519"
+          },
+          "3ffc904c210a38caee0af8196909d6609d158f6c22b782906093cfc441b8a773": {
+            "keytype": "ed25519",
+            "keyval": {
+              "public": "d39a5785b4575a8aa1aa365efbb0f2dd16973636329c3ee28190c14b26e073bf"
+            },
+            "scheme": "ed25519"
+          },
+          "c7706cbba55109d4275ac8777aa7edf2d7600537ff1fbaa18fc938814ceeb026": {
+            "keytype": "ed25519",
+            "keyval": {
+              "public": "5450581c5f0e3cfd0a37add8ead59b6ece2df43b395d9fc632e3723b6490ba64"
+            },
+            "scheme": "ed25519"
+          },
+          "e5f9657e0d66f86a4bc55eb280b54335ec8b4a93b70d948427c4f0aae9e7face": {
+            "keytype": "ed25519",
+            "keyval": {
+              "public": "c21f08c2fec5abedbc3c18334683221127b0b9a01b0d4e9f34f5194060e4fca3"
+            },
+            "scheme": "ed25519"
+          },
+          "e8e5e077ee34a5f17b32b6385ca70128b71fb23006e2ee03a6310e43d40bceb5": {
+            "keytype": "ed25519",
+            "keyval": {
+              "public": "6f381a2d74bce30ad6359ad251a7119b90b9a89f7af212921f9b86b473d29b3f"
+            },
+            "scheme": "ed25519"
+          }
+        },
+        "roles": {
+          "root": {
+            "keyids": [
+              "3ffc904c210a38caee0af8196909d6609d158f6c22b782906093cfc441b8a773",
+              "e5f9657e0d66f86a4bc55eb280b54335ec8b4a93b70d948427c4f0aae9e7face"
+            ],
+            "threshold": 2
+          },
+          "snapshot": {
+            "keyids": [
+              "e8e5e077ee34a5f17b32b6385ca70128b71fb23006e2ee03a6310e43d40bceb5"
+            ],
+            "threshold": 1
+          },
+          "targets": {
+            "keyids": [
+              "c7706cbba55109d4275ac8777aa7edf2d7600537ff1fbaa18fc938814ceeb026"
+            ],
+            "threshold": 1
+          },
+          "timestamp": {
+            "keyids": [
+              "0f32d28245ffb658841bb56fb0b70b0cd1b8c638b1172b7e25e9b480b974d42e"
+            ],
+            "threshold": 1
+          }
+        },
+        "spec_version": "1.0.31",
+        "version": 1
+      }
+    },
     "first_party_ids": [],
-    "plugin_ids": ["local.creative_library"],
-    "plugin_namespaces": ["patreon"]
+    "plugin_ids": [
+      "local.creative_library"
+    ],
+    "plugin_namespaces": [
+      "patreon"
+    ]
   }
 }
