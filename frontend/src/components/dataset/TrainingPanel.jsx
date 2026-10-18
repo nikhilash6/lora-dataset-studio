@@ -676,7 +676,10 @@ export default function TrainingPanel({ ds, keptCount, kind, onCheckpointsChange
   // never claim 768+1024 for a run that will emit 768.
   const advResStored = adv?.resolution ?? '768,1024';
   const advRes = (!!slider?.enabled && !adv?.resolution_explicit) ? '768' : advResStored;
-  const advResLabel = { '768': '768px', '1024': '1024px', '768,1024': '768+1024px' }[advRes] || advRes;
+  const advResLabel = {
+    '768': '768px', '1024': '1024px', '512,768': '512+768px',
+    '768,1024': '768+1024px', '512,768,1024': '512+768+1024px',
+  }[advRes] || advRes;
   const advSave = adv?.save_every ?? 250;
   const advSampleEvery = adv?.sample_every ?? 250;
   const advSampleEveryChoices = adv?.sample_every_choices ?? [100, 250, 500, 1000];
@@ -2431,13 +2434,15 @@ export default function TrainingPanel({ ds, keptCount, kind, onCheckpointsChange
                   aria-label="Training resolution"
                   className="px-2 py-1 rounded-lg border border-border bg-surface text-content text-[0.75rem]">
                   <option value="768,1024">768 + 1024 (multi-scale)</option>
+                  <option value="512,768,1024">512 + 768 + 1024 (multi-scale)</option>
+                  <option value="512,768">512 + 768 (multi-scale)</option>
                   <option value="1024">1024 only</option>
                   <option value="768">768 only (low VRAM)</option>
                 </select>
               </div>
               <span className="text-content-subtle text-[0.6875rem] leading-relaxed">
                 <b className="text-content-muted font-medium">Why:</b> the size(s) images are trained at — and the #1
-                VRAM lever. <b className="text-content-muted font-medium">How:</b> multi-scale trains at two sizes so
+                VRAM lever. <b className="text-content-muted font-medium">How:</b> multi-scale trains at several sizes so
                 the LoRA holds up from a close-up face to a full-body shot; single 1024 is a bit faster.
                 <b className="text-content-muted font-medium"> 768 only</b> cuts memory use sharply and trains much
                 faster — on the 12B families (Krea 2, FLUX) it is your best shot on a GPU under

@@ -26,6 +26,14 @@ from ._common import (_map_error, _require_comfyui, _require_no_stalled_comfyui,
 
 bp = Blueprint('studio', __name__, url_prefix='/api/studio')
 
+
+@bp.get('/families')
+def studio_families():
+    """Generation pipelines available without a trained dataset or LoRA."""
+    return jsonify({'families': [
+        {'id': family, 'label': lts._MODE_LABEL_BY_FAMILY.get(family, family)}
+        for family in lts.GENERATION_FAMILIES]})
+
 # SQLite Integer primary keys are signed 64-bit values.  Python ints are
 # arbitrary precision, so validate before an oversized JSON value reaches a DB bind.
 _MAX_DATABASE_ID = (1 << 63) - 1
@@ -131,7 +139,7 @@ def studio_base_models():
                         'model_defaults': defaults})
     out = [{'filename': m or '', 'label': lts._basename(m) if m else 'Default model'}
            for m in lts.family_base_models(kind)]
-    if kind in lts.TRAINED_IMAGE_FAMILIES:
+    if kind in lts.MANAGED_IMAGE_FAMILIES:
         from ..services.trained_image_models import generation_readiness
         readiness = generation_readiness(kind)
         capabilities['generation_readiness'] = readiness
@@ -168,9 +176,11 @@ def studio_civitai_images():
     prompt, for the Studio/Canvas prompt field. Listing is public; prompts
     need the (free) Civitai API key — `has_key` tells the UI which story to
     show. Continuation is (`next_cursor`, `next_skip`) echoed back verbatim.
+    `link` = a Civitai model page link: that page's gallery instead, named by
+    `source` in the answer.
 
-    400 = bad filter value · 409 = Civitai unreachable / key refused (the
-    sentence carries the remedy)."""
+    400 = bad filter value or link · 409 = Civitai unreachable / key refused
+    (the sentence carries the remedy)."""
     from ..services import civitai_browser
     a = request.args
     try:
@@ -178,7 +188,8 @@ def studio_civitai_images():
             period=a.get('period', 'week'), sort=a.get('sort', 'reactions'),
             level=a.get('level', 'none'), cursor=a.get('cursor') or None,
             skip=a.get('skip', 0), want=a.get('want', 12),
-            require_prompt=a.get('require_prompt', '1') != '0')
+            require_prompt=a.get('require_prompt', '1') != '0',
+            link=a.get('link') or None)
     except Exception as e:
         return _map_error(e)
     return jsonify({'ok': True, **res})
@@ -345,6 +356,7 @@ def studio_run():
             # unlike dataset and canvas launch routes. Absent body field remains
             # None, preserving previous single-prompt behavior.
             prompts=d.get('prompts'),
+            base_family=(d.get('family') or '') if d.get('base_only') is True else None,
             external_loras=d.get('external_loras'), combine=d.get('combine'))
     except Exception as e:
         from ..services.lora_test_studio import StudioArchMismatch, StudioAssetsMissing

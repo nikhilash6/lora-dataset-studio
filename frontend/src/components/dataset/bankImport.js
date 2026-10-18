@@ -1,9 +1,10 @@
-/* 🗃 Import from a bank — the DECIDABLE part, kept free of JSX so `node --test`
-   can run it.
+/* 🗃 Import from a bank or a dataset — the DECIDABLE part, kept free of JSX so
+   `node --test` can run it.
 
-   The dataset side never re-implements the bank's image picker: it only picks a
-   BANK, and the server's own promote path does the rest (normalize + perceptual
-   dedup against the dataset). What has to be right here is the ARITHMETIC and
+   Two ways in. "Import all kept" picks a whole BANK and lets the server's own
+   promote path do the rest (normalize + perceptual dedup against the dataset);
+   the picker copies only the images the user clicked, from a bank or from
+   another dataset. For the first, what has to be right is the ARITHMETIC and
    the WORDING, because "0 promotable" has two completely different meanings:
 
      * the bank was never triaged — promote only ever copies KEPT images, so a
@@ -126,4 +127,82 @@ export function promoteOutcome(activity) {
   if (activity.error) return { kind: 'error', text: `Import failed — ${activity.error}` };
   if (activity.cancelled) return { kind: 'info', text: activity.detail || 'Import stopped.' };
   return { kind: 'success', text: activity.detail || 'Import finished.' };
+}
+
+/* ---- The picker: images chosen one by one, from a bank or a dataset ---------
+   One <select> lists both kinds of source. A bank pages over SQL and serves its
+   thumbnails by row id; a dataset arrives whole and serves them by filename. */
+
+/** The library's datasets, for the "Datasets" half of the source chooser. */
+export const datasetsUrl = '/api/dataset/list';
+
+/** One dataset's payload, whose `images` the picker offers. */
+export const datasetUrl = (datasetId) => `/api/dataset/${Number(datasetId)}`;
+
+/** The chooser's option value, so one select can carry both kinds. */
+export const sourceValue = (kind, id) => `${kind}:${Number(id)}`;
+
+/** 'bank:3' → { kind: 'bank', id: 3 }; anything else → null. */
+export function parseSource(value) {
+  const m = /^(bank|dataset):(\d+)$/.exec(String(value || ''));
+  return m ? { kind: m[1], id: Number(m[2]) } : null;
+}
+
+/** The OTHER datasets of the library, read off /api/dataset/list: a dataset is
+ *  never offered as a source for itself. */
+export function datasetSourceOptions(datasets, currentId) {
+  return (datasets || [])
+    .filter((d) => d && Number(d.id) !== Number(currentId))
+    .map((d) => ({
+      id: d.id,
+      name: d.name || '',
+      total: Number(d.images_total || 0),
+      kept: Number(d.images_kept || 0),
+    }));
+}
+
+/** Bank rows per picker page — a bank can hold six figures of images. */
+export const PICKER_PAGE = 120;
+
+/** One page of a bank's images for the picker: the kept ones, unless `all`. */
+export function bankImagesUrl(bankId, { all = false, offset = 0 } = {}) {
+  const qs = new URLSearchParams({ offset: String(offset), limit: String(PICKER_PAGE) });
+  if (!all) qs.set('status', 'keep');
+  return `/api/bank/${Number(bankId)}/images?${qs}`;
+}
+
+/** What the picker offers from a dataset: rows that have a file (a failed
+ *  generation has none), the kept ones unless `all`. */
+export function pickableDatasetImages(images, { all = false } = {}) {
+  return (images || []).filter((img) => img && img.filename && img.status !== 'failed'
+    && (all || img.status === 'keep'));
+}
+
+/** Promote body for an explicit selection: the bank copies exactly these ids,
+ *  whatever their status. */
+export const promoteSelectionBody = (datasetId, ids) => ({
+  dataset_id: Number(datasetId),
+  image_ids: (ids || []).map(Number),
+});
+
+/** POST route copying picked images of another dataset into this one. */
+export const importFromDatasetUrl = (datasetId) =>
+  `/api/dataset/${Number(datasetId)}/import-from-dataset`;
+
+/** Ids per POST. The server accepts up to 200; smaller batches let the button
+ *  count the copy as it goes. */
+export const DATASET_COPY_BATCH = 50;
+
+export function idBatches(ids, size = DATASET_COPY_BATCH) {
+  const out = [];
+  for (let i = 0; i < (ids || []).length; i += size) out.push(ids.slice(i, i + size));
+  return out;
+}
+
+/** The end-of-copy toast, worded like the other dataset imports. */
+export function datasetCopyOutcome({ imported = 0, duplicates = 0, failed = 0 } = {}) {
+  const parts = [`${imported} imported`];
+  if (duplicates) parts.push(`${duplicates} duplicate(s) skipped`);
+  if (failed) parts.push(`${failed} could not be copied`);
+  return parts.join(' · ');
 }

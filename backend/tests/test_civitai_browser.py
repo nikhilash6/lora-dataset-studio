@@ -6,7 +6,7 @@ mirror measured 2026-08-27 answers: v1 listing items carry NO meta (prompts
 only exist behind `image.getGenerationData`, which 401s without a key).
 """
 import json
-from urllib.parse import parse_qs, unquote, urlparse
+from urllib.parse import parse_qs, quote, unquote, urlparse
 
 import pytest
 
@@ -46,9 +46,10 @@ class FakeCivitai:
     """Answers the two upstream endpoints from in-memory fixtures and records
     every call, so tests can assert HOW MANY network trips a browse() cost."""
 
-    def __init__(self, pages, gen):
+    def __init__(self, pages, gen, models=None):
         self.pages = pages    # cursor (None = first) -> listing page json
         self.gen = gen        # image id -> gen json | Exception to raise
+        self.models = models or {}   # url fragment -> model json | Exception
         self.calls = []
 
     def __call__(self, url, key=None):
@@ -59,11 +60,21 @@ class FakeCivitai:
             if isinstance(answer, Exception):
                 raise answer
             return answer
+        for fragment, answer in self.models.items():
+            if fragment in url:
+                if isinstance(answer, Exception):
+                    raise answer
+                return answer
         cursor = parse_qs(urlparse(url).query).get('cursor', [None])[0]
         return self.pages[cursor]
 
     def listing_calls(self):
         return [c for c in self.calls if 'getGenerationData' not in c[0]]
+
+    def images_query(self):
+        """Query of the last v1 images listing call, parsed."""
+        url = [u for u, _ in self.calls if '/api/v1/images' in u][-1]
+        return parse_qs(urlparse(url).query)
 
     def gen_calls(self):
         return [c for c in self.calls if 'getGenerationData' in c[0]]
@@ -250,6 +261,55 @@ def test_want_and_skip_are_clamped(monkeypatch):
     assert [c['id'] for c in res['items']] == [1, 2, 3]
 
 
+# ------------------------------------------------------------- model link ----
+
+@pytest.mark.parametrize('link, expected', [
+    ('https://civitai.red/models/2945475/bss-desirex-krea2?modelVersionId=3372987',
+     ('civitai.red', 2945475, 3372987)),
+    ('civitai.com/models/12', ('civitai.com', 12, None)),
+    ('https://www.civitai.com/models/12/name', ('civitai.com', 12, None)),
+])
+def test_model_link_gives_host_model_and_version(link, expected):
+    assert cb.parse_model_link(link) == expected
+
+
+@pytest.mark.parametrize('link', [
+    'https://example.com/models/12', 'https://civitai.com/images/5',
+    'https://civitai.com/models/abc', 'https://civitai.com/models/12?modelVersionId=x',
+    'hello',
+])
+def test_other_links_are_refused(link):
+    with pytest.raises(ValueError):
+        cb.parse_model_link(link)
+
+
+def test_model_link_walks_that_version_gallery_all_time(monkeypatch):
+    fake = FakeCivitai(
+        {None: {'items': [_item(1), _item(2)], 'metadata': {'nextCursor': None}}},
+        {1: _gen_json('p1'), 2: _gen_json('p2')},
+        models={'/model-versions/456': {'name': 'Soft', 'model': {'name': 'DesireX'}}})
+    _wire(monkeypatch, fake)
+    res = cb.browse(period='week',
+                    link='https://civitai.red/models/123/x?modelVersionId=456')
+    assert [c['prompt'] for c in res['items']] == ['p1', 'p2']
+    assert res['source'] == {'title': 'DesireX · Soft',
+                             'page_url': 'https://civitai.red/models/123?modelVersionId=456'}
+    query = fake.images_query()
+    assert query['modelVersionId'] == ['456'] and query['period'] == ['AllTime']
+
+
+def test_link_without_version_opens_on_the_first_listed_version(monkeypatch):
+    fake = FakeCivitai(
+        {None: {'items': [_item(1)], 'metadata': {'nextCursor': None}}},
+        {1: _gen_json('p1')},
+        models={'/models/123': {'name': 'DesireX', 'modelVersions': [
+            {'id': 9, 'name': 'X2'}, {'id': 456, 'name': 'Soft'}]}})
+    _wire(monkeypatch, fake)
+    res = cb.browse(link='civitai.com/models/123')
+    assert res['source']['title'] == 'DesireX · X2'
+    assert fake.images_query()['modelVersionId'] == ['9']
+
+
 # ------------------------------------------------------------------ route ----
 
 def test_route_passes_filters_and_answers_ok(client, monkeypatch):
@@ -268,7 +328,7 @@ def test_route_passes_filters_and_answers_ok(client, monkeypatch):
     assert body['ok'] is True and body['has_key'] is True
     assert seen == {'period': 'month', 'sort': 'newest', 'level': 'x',
                     'cursor': 'abc', 'skip': '4', 'want': '6',
-                    'require_prompt': False}
+                    'require_prompt': False, 'link': None}
 
 
 def test_route_maps_upstream_failure_to_409(client, monkeypatch):
@@ -285,3 +345,12 @@ def test_route_maps_bad_params_to_400(client, monkeypatch):
     _wire(monkeypatch, FakeCivitai({}, {}))
     r = client.get('/api/studio/civitai/images?period=fortnight')
     assert r.status_code == 400
+
+
+def test_route_answers_400_for_a_link_naming_no_model(client, monkeypatch):
+    _wire(monkeypatch, FakeCivitai(
+        {}, {}, models={'/model-versions/456': cb.CivitaiNotFound('404')}))
+    link = quote('https://civitai.com/models/1?modelVersionId=456')
+    r = client.get(f'/api/studio/civitai/images?link={link}')
+    assert r.status_code == 400
+    assert 'no model at this link' in r.get_json()['error']

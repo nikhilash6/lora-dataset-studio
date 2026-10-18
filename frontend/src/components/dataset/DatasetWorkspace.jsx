@@ -1080,9 +1080,9 @@ export default function DatasetWorkspace({ ds, onBack }) {
     </button>
   );
 
-  // Third source next to the dropzone and the scraper: an already-triaged bank.
-  // The server's promote path does the copying (normalize + dedup vs THIS
-  // dataset) in a background job — we only pick the bank and refresh at the end.
+  // Third source next to the dropzone and the scraper: a bank or another dataset,
+  // image by image (or a bank's whole kept set). The server does the copying
+  // (normalize + dedup vs THIS dataset); the panel refreshes us at the end.
   const bankImport = (
     <BankImportPanel datasetId={d.id} disabled={importBusy}
       onImported={() => ds.refresh()} />

@@ -60,6 +60,7 @@ the tests drive, with the network replaced through `_transport`.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import math
@@ -72,6 +73,7 @@ import time
 import uuid
 from datetime import datetime, timedelta, timezone
 from email.utils import parsedate_to_datetime
+from pathlib import Path
 
 import requests
 from PIL import Image
@@ -812,14 +814,32 @@ def link_for(record_id, step, filename=None, hint=None):
     return _prefer(q.order_by(CivitaiLink.id.asc()).all(), stem=_clean_stem(hint) if hint else None)
 
 
+def deployed_lora_name(checkpoint) -> str:
+    """The file name a picture's LoRA was deployed under, without its folder."""
+    return re.split(r'[\\/]', str(checkpoint or '').strip())[-1]
+
+
+def _picture_link(dataset_id, name):
+    """The page a picture's LoRA was given from the picture door (its run not
+    here): one detached link per deployed name and dataset."""
+    from .models import CivitaiLink
+    if dataset_id is None or not name:
+        return None
+    return (CivitaiLink.query.filter_by(dataset_id=int(dataset_id), record_id=None, filename=name)
+            .order_by(CivitaiLink.id.desc()).first())
+
+
 def link_for_image(row):
     """The page a generated picture belongs to: the links of the checkpoint
     stamped on its row, the one whose file its deployed name was made from
-    first. None when the row carries no stamp — the caller then offers the
+    first. A row without a stamp finds the page its LoRA was given from a
+    picture (`link_image_to_page`), else None — the caller then offers the
     dataset's links, which is the ORDINARY path for a final save's pictures."""
-    if row is None or row.record_id is None or row.step is None:
+    if row is None:
         return None
-    return link_for(row.record_id, row.step, hint=row.checkpoint)
+    if row.record_id is not None and row.step is not None:
+        return link_for(row.record_id, row.step, hint=row.checkpoint)
+    return _picture_link(row.dataset_id, deployed_lora_name(row.checkpoint))
 
 
 def links_for_dataset(dataset_id) -> list:
@@ -848,16 +868,23 @@ def save_link(record_id, step, filename, dataset_id, *, model_id, version_id,
     `model_name` defaults to None, not '': the job-harvest guard
     (tests/test_dataset_job_harvest.py) reads every `model_name=<str>` default
     in this package as an engine stamping a job name, and '' read as an
-    engine the dispatch does not route. It is a Civitai page's name here."""
+    engine the dispatch does not route. It is a Civitai page's name here.
+
+    `record_id` None is a picture's LoRA whose run is not here: keyed by its
+    deployed name in its dataset (`_picture_link`)."""
     from .models import db
     from .models import CivitaiLink
     filename = str(filename or '')
-    row = (CivitaiLink.query.filter_by(record_id=int(record_id), step=int(step),
-                                       filename=filename).first())
+    if record_id is None:
+        row = _picture_link(dataset_id, filename)
+    else:
+        row = (CivitaiLink.query.filter_by(record_id=int(record_id), step=int(step),
+                                           filename=filename).first())
     if row is None:
-        row = CivitaiLink(record_id=int(record_id), step=int(step), filename=filename,
-                          dataset_id=int(dataset_id))
+        row = CivitaiLink(record_id=None if record_id is None else int(record_id),
+                          step=int(step), filename=filename, dataset_id=int(dataset_id))
         db.session.add(row)
+    row.step = int(step)
     row.dataset_id = int(dataset_id)
     row.model_id = int(model_id)
     row.version_id = int(version_id)
@@ -927,7 +954,12 @@ def link_checkpoint_to_page(record_id, step, ref, key, filename=None, version_id
     if not str(filename or '').strip():
         filename = resolve_save_filename(rec, step, hint) or ''
     page, url_version = lookup_model_page(ref, key)
-    wanted = version_id or url_version
+    return _link_to_version(record_id, step, filename, rec.dataset_id, page,
+                            version_id or url_version), page
+
+
+def _link_to_version(record_id, step, filename, dataset_id, page, wanted):
+    """Pick the version (the wanted one, else the newest) and remember it."""
     version = None
     if wanted:
         version = next((v for v in page['versions'] if v['id'] == int(wanted)), None)
@@ -937,11 +969,37 @@ def link_checkpoint_to_page(record_id, step, ref, key, filename=None, version_id
                               f'{_versions_line(page)}. Look the page up and pick one.')
     else:
         version = page['versions'][0]
-    link = save_link(record_id, step, filename, rec.dataset_id, model_id=page['id'],
+    return save_link(record_id, step, filename, dataset_id, model_id=page['id'],
                      version_id=version['id'], model_name=page['name'],
                      version_name=version['name'], base_model=version.get('base_model'),
                      published=(str(page.get('status') or '').lower() == 'published') or None)
-    return link, page
+
+
+def link_image_to_page(image_id, ref, key, version_id=None, user_id=LOCAL_USER):
+    """"This LoRA's Civitai page", from the picture door. A stamped picture
+    marks its run's save as usual; an unstamped one (its run removed, or made
+    before the stamp) is remembered by the deployed LoRA name it ran with, in
+    its dataset, so the next pictures of that LoRA find the page. Returns
+    (link, page)."""
+    from lds_sdk.gallery_exports import GalleryExports
+    try:
+        rows = GalleryExports(user_id).finished([int(image_id)])
+    except (TypeError, ValueError):
+        rows = ()
+    if not rows:
+        raise CivitaiPublishError('image_missing', 'This image is not finished or no longer on disk.')
+    row = rows[0]
+    if row.record_id is not None and row.step is not None:
+        return link_checkpoint_to_page(row.record_id, row.step, ref, key,
+                                       version_id=version_id, hint=row.checkpoint)
+    name = deployed_lora_name(row.checkpoint)
+    if not name:
+        raise CivitaiPublishError('invalid', 'This picture names no LoRA to link.')
+    page, url_version = lookup_model_page(ref, key)
+    block = _step_block(name)
+    step = row.step if row.step is not None else (int(block) if block else 0)
+    return _link_to_version(None, step, name, row.dataset_id, page,
+                            version_id or url_version), page
 
 
 # --- the model page (a new one, from a checkpoint) ------------------------------
@@ -1120,12 +1178,143 @@ def _extra_loras(row) -> list:
     return [e for e in entries if isinstance(e, dict) and e.get('filename')]
 
 
-def image_meta(row, ds, link, width, height) -> dict:
+# --- the generation model → a second resource of the picture ---------------------
+# Civitai files a picture under every version its `civitaiResources` names, so
+# the base checkpoint a cell ran on can get the picture into ITS gallery too —
+# through that checkpoint's Civitai version id, which only the file can tell:
+# Civitai answers /model-versions/by-hash/<sha256> for every file it hosts
+# (measured 2026-10-17: a 13 GB checkpoint hashed in 10 s, looked up in 0.3 s).
+# A file converted or trained locally is unknown there and is simply not tagged.
+
+_MODEL_CACHE_NAME = 'generation-models.json'
+_MISS_TTL = 24 * 3600          # a page published later is found the next day
+_HASH_BLOCK = 16 * 1024 * 1024
+_model_lock = threading.Lock()
+_model_cache = None            # {'files': {path: {size, mtime_ns, sha256}}, 'versions': {sha: {at, version}}}
+_data_dir = None               # the plugin context's data_dir (register); None = memory only
+
+
+def set_data_dir(path):
+    global _data_dir, _model_cache
+    _data_dir = Path(path) if path else None
+    _model_cache = None
+
+
+def _models_cache():
+    global _model_cache
+    if _model_cache is None:
+        _model_cache = {'files': {}, 'versions': {}}
+        if _data_dir is not None:
+            try:
+                stored = json.loads((_data_dir / _MODEL_CACHE_NAME).read_text(encoding='utf-8'))
+                if isinstance(stored, dict):
+                    _model_cache['files'] = dict(stored.get('files') or {})
+                    _model_cache['versions'] = dict(stored.get('versions') or {})
+            except (OSError, ValueError):
+                pass
+    return _model_cache
+
+
+def _save_models_cache():
+    if _data_dir is None:
+        return
+    try:
+        _data_dir.mkdir(parents=True, exist_ok=True)
+        tmp = _data_dir / (_MODEL_CACHE_NAME + '.tmp')
+        tmp.write_text(json.dumps(_models_cache()), encoding='utf-8')
+        os.replace(tmp, _data_dir / _MODEL_CACHE_NAME)
+    except OSError:
+        logger.debug('could not save the generation model cache', exc_info=True)
+
+
+def _generation_model_path(row):
+    """The base model file a cell ran on, on this machine, or None."""
+    name = (getattr(row, 'z_model', None) or '').strip()
+    if not name:
+        return None
+    try:
+        from lds_sdk.models import resolve_model_file
+    except ImportError:
+        return None
+    for folder in ('diffusion_models', 'unet', 'checkpoints'):
+        path = resolve_model_file(folder, name)
+        if path and os.path.isfile(path):
+            return str(path)
+    return None
+
+
+def _file_sha256(path, progress=None):
+    """sha256 of a model file, cached on (path, size, mtime) — 13 GB is ten seconds once."""
+    st = os.stat(path)
+    cache_key = os.path.normcase(os.path.abspath(path))
+    with _model_lock:
+        hit = _models_cache()['files'].get(cache_key)
+    if hit and hit.get('size') == st.st_size and hit.get('mtime_ns') == st.st_mtime_ns:
+        return hit['sha256']
+    digest, done = hashlib.sha256(), 0
+    with open(path, 'rb') as fh:
+        while True:
+            block = fh.read(_HASH_BLOCK)
+            if not block:
+                break
+            digest.update(block)
+            done += len(block)
+            if progress and st.st_size:
+                progress('identifying', done / st.st_size)
+    sha = digest.hexdigest()
+    with _model_lock:
+        _models_cache()['files'][cache_key] = {'size': st.st_size, 'mtime_ns': st.st_mtime_ns,
+                                               'sha256': sha}
+        _save_models_cache()
+    return sha
+
+
+def _version_by_hash(sha, key):
+    """{'version_id', 'model_id', 'name'} of the Civitai version hosting this
+    file, or None when Civitai hosts no such file. A hit is kept for good (a
+    hash names one file), a miss for a day; a failed call is not kept at all."""
+    with _model_lock:
+        hit = _models_cache()['versions'].get(sha)
+    if hit and (hit.get('version') or time.time() - float(hit.get('at') or 0) < _MISS_TTL):
+        return hit.get('version')
+    st, headers, body = _transport('GET', f'{API_BASE}/api/v1/model-versions/by-hash/{sha}',
+                                   headers=_headers(key, json_body=False))
+    _note_server_date(headers)
+    parsed = _decode(body)
+    if st == 404:
+        version = None
+    elif st == 200 and isinstance(parsed, dict) and parsed.get('id') and parsed.get('modelId'):
+        names = ((parsed.get('model') or {}).get('name'), parsed.get('name'))
+        version = {'version_id': int(parsed['id']), 'model_id': int(parsed['modelId']),
+                   'name': ' · '.join(n for n in names if n) or f"version {parsed['id']}"}
+    else:
+        raise CivitaiPublishError('civitai', f'the model lookup answered HTTP {st}')
+    with _model_lock:
+        _models_cache()['versions'][sha] = {'at': time.time(), 'version': version}
+        _save_models_cache()
+    return version
+
+
+def generation_model(row, key, progress=None):
+    """The Civitai version of the base model a cell ran on, or None. Never
+    sinks a post: a model that cannot be identified is just not tagged."""
+    try:
+        path = _generation_model_path(row)
+        return _version_by_hash(_file_sha256(path, progress), key) if path else None
+    except Exception:   # best effort by design: the post goes out either way
+        logger.info('generation model of image %s not identified on Civitai',
+                    getattr(row, 'id', None), exc_info=True)
+        return None
+
+
+def image_meta(row, ds, link, width, height, checkpoint=None) -> dict:
     """The generation data Civitai shows under the image — every value a
     column the cell already persisted, so what is published is what ran.
     `civitaiResources` is what files the picture under the model on the site
-    (its resource detection reads `modelVersionId` there, no hash needed);
-    `resources` is the human-readable list."""
+    (its resource detection reads `modelVersionId` there, no hash needed):
+    the LoRA's linked page, plus `checkpoint` — the generation model's version
+    (`generation_model`) — when Civitai knows it; `resources` is the
+    human-readable list."""
     meta = {'prompt': _prompt_as_generated(row, ds)}
     if row.negative:
         meta['negativePrompt'] = row.negative
@@ -1161,6 +1350,9 @@ def image_meta(row, ds, link, width, height) -> dict:
     if link is not None:
         meta['civitaiResources'] = [{'type': 'lora', 'weight': row.strength,
                                      'modelVersionId': int(link.version_id)}]
+    if checkpoint and (link is None or int(checkpoint['version_id']) != int(link.version_id)):
+        meta.setdefault('civitaiResources', []).append(
+            {'type': 'checkpoint', 'modelVersionId': int(checkpoint['version_id'])})
     return meta
 
 
@@ -1195,10 +1387,12 @@ def _upload_image(path, key):
 
 
 def post_images(image_ids, link, key, title=None, publish=True, progress=None,
-                user_id=LOCAL_USER):
+                user_id=LOCAL_USER, hide_meta=False):
     """Post generated images on the version a checkpoint is linked to —
     synchronous, the tested seam. post.create → per image: sanitized PNG,
-    upload, post.addImage with its meta → optionally post.update {publishedAt}."""
+    upload, post.addImage with its meta (the generation model tagged when
+    Civitai knows its file), post.updateImage {hideMeta} when asked →
+    optionally post.update {publishedAt}."""
     from lds_sdk.gallery_exports import GalleryExports
     from lds_sdk.dataset_exports import DatasetExports
     if not key:
@@ -1222,6 +1416,10 @@ def post_images(image_ids, link, key, title=None, publish=True, progress=None,
     if not rows:
         raise CivitaiPublishError('image_missing', 'None of the selected images is finished and on disk.')
     datasets = {}
+    checkpoints = {}       # z_model -> its Civitai version, or None
+    for row in rows:
+        if row.z_model and row.z_model not in checkpoints:
+            checkpoints[row.z_model] = generation_model(row, key, progress)
     tmp = tempfile.mkdtemp(prefix='lds-civitai-')
     try:
         if progress:
@@ -1237,13 +1435,24 @@ def post_images(image_ids, link, key, title=None, publish=True, progress=None,
                 datasets[row.dataset_id] = DatasetExports(user_id).get_dataset(row.dataset_id)
             path, w, h = _staged_png(row, tmp)
             uuid_ = _upload_image(path, key)
-            meta = image_meta(row, datasets[row.dataset_id], link, w, h)
+            meta = image_meta(row, datasets[row.dataset_id], link, w, h,
+                              checkpoints.get(row.z_model))
             img = trpc_mutation('post.addImage', {
                 'postId': post_id, 'modelVersionId': int(link.version_id), 'url': uuid_,
                 'index': index, 'width': w, 'height': h, 'mimeType': 'image/png',
                 'type': 'image', 'meta': meta,
             }, key)
-            added.append({'image_id': row.id, 'civitai_image_id': (img or {}).get('id')})
+            civitai_image_id = (img or {}).get('id')
+            if hide_meta:
+                # Civitai's own "hide prompt" toggle sends hideMeta alone and keeps the
+                # stored meta; post.addImage has no such field (it would be dropped).
+                if not civitai_image_id:
+                    raise CivitaiPublishError(
+                        'civitai', 'Civitai did not name the uploaded image, so its generation '
+                                   'data could not be hidden - the post was left unpublished.')
+                trpc_mutation('post.updateImage', {'id': int(civitai_image_id), 'hideMeta': True},
+                              key)
+            added.append({'image_id': row.id, 'civitai_image_id': civitai_image_id})
             if progress:
                 progress('uploading', (index + 1) / len(rows))
         published = False
@@ -1251,9 +1460,14 @@ def post_images(image_ids, link, key, title=None, publish=True, progress=None,
             trpc_mutation('post.update', {'id': post_id, 'publishedAt': _publish_stamp_iso()},
                           key, date_fields=('publishedAt',))
             published = True
+        tagged = {v['version_id']: v['name'] for v in checkpoints.values()
+                  if v and int(v['version_id']) != int(link.version_id)}
         return {'post_id': post_id, 'published': published, 'count': len(added),
                 'images': added, 'url': post_url(post_id, published),
-                'model_url': model_url(link.model_id, link.version_id)}
+                'model_url': model_url(link.model_id, link.version_id),
+                'generation_models': list(tagged.values()),
+                'generation_untagged': sum(1 for v in checkpoints.values() if not v),
+                'hidden_meta': bool(hide_meta)}
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 

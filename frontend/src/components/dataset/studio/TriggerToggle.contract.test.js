@@ -40,8 +40,8 @@ test('RunSetupPanel derives the launch body — it NEVER writes into genSettings
   assert.doesNotMatch(panel, /base\.inject_trigger\s*=/);
 });
 
-test('ComparisonStudio sends inject_trigger only when unticked', () => {
-  assert.match(comparison, /if \(!injectTrigger\) body\.inject_trigger = false;/);
+test('ComparisonStudio disables trigger injection for base-only runs or an unticked preference', () => {
+  assert.match(comparison, /if \(baseOnly \|\| !injectTrigger\) body\.inject_trigger = false;/);
 });
 
 test('one shared preference module, default-true, written only when unticked', () => {

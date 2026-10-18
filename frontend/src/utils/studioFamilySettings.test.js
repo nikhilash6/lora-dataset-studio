@@ -38,7 +38,7 @@ test('a missing configured model is never replaced by the first installed model'
 
 test('new families do not inherit legacy Turbo settings and keep separate comparison axes', () => {
   const saved = storage({ studioComp_steps: '[8]', studioComp_cfgs: '[1]' });
-  for (const family of ['flux', 'anima', 'qwenimage21']) {
+  for (const family of ['flux', 'anima', 'qwenimage21', 'moss']) {
     assert.equal(readComparisonAxis(saved, 'studioComp_steps', family), null);
     assert.equal(readComparisonAxis(saved, 'studioComp_cfgs', family), null);
   }

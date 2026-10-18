@@ -84,6 +84,52 @@ import { SETUP_DEEP_LINK_STEPS } from './hooks/useSetupSteps.js';
 // Newest first. Prepend new waves at the top.
 export const WHATS_NEW = [
   {
+    id: '2026-10-18-studio-moss-image', date: '2026-10-18',
+    title: 'Create with MOSS-Image in Test Studio',
+    blurb: 'Choose Base model only, then MOSS-Image. Existing model files are reused; missing files and the MOSS loaders can be prepared from the Studio.',
+    to: '/studio',
+  },
+  {
+    id: '2026-10-17-studio-base-model-only', date: '2026-10-17',
+    title: 'Generate in Test Studio without a LoRA',
+    blurb: 'Choose Base model only, pick a model family and base, then enter your prompt. No trained dataset or LoRA selection is required.',
+    to: '/studio',
+  },
+  {
+    id: '2026-10-17-dataset-import-picked-images',
+    date: '2026-10-17',
+    title: 'Pick the images to import from a bank or another dataset',
+    blurb: '"Import from a bank or a dataset" in Add images now shows the source\'s images: click the ones you want and only those are copied, with their captions. Your other datasets are offered as sources next to your banks, and a bank can still send its whole kept set.',
+    to: '/datasets?section=add',
+  },
+  {
+    id: '2026-10-17-civitai-model-link-prompts',
+    date: '2026-10-17',
+    title: 'Grab the prompts of one Civitai model page',
+    blurb: 'Paste a Civitai model link (civitai.com or civitai.red) into the 🌐 Civitai browser to see the images of that page next to their prompts: the creator’s showcase and the whole gallery of that version. Use, copy or batch them like the top prompts.',
+    to: '/studio',
+  },
+  {
+    id: '2026-10-13-qwen21-community-training-preset',
+    date: '2026-10-13',
+    title: 'Start Qwen-Image 2.1 character training from a community recipe',
+    blurb: 'Character datasets now offer a Qwen-Image 2.1 LoKr preset under Advanced options → Presets. It applies the reported full-rank factor-4, Automagic3 and multi-resolution settings, with a 2,000–3,000-step target and previews every 250 steps. The Guide links the reports and explains where results vary.',
+    to: '/datasets?section=training',
+  },
+  {
+    id: '2026-10-11-z-lmstudio-framing',
+    date: '2026-10-11',
+    title: 'Classify framing reads close-ups again with LM Studio',
+    blurb: 'With LM Studio as the local LLM provider, Classify framing labelled every image as bust. LDS now sends the image before the question, as it does with Ollama, so close-ups come back as face again. Thanks to vitokorn for reporting this.',
+  },
+  {
+    id: '2026-10-11-runs-page-local-training',
+    date: '2026-10-11',
+    title: 'Follow local training on the Runs page again',
+    blurb: 'Without the Cloud training plugin, the Runs page showed HTTP 404 instead of your runs. It now shows your local training in progress and your saved runs. Thanks to somedude1001 for reporting this.',
+    to: '/cloud',
+  },
+  {
     id: '2026-10-05-patreon-access',
     date: '2026-10-05',
     title: 'LDS updates and exclusive plugins on Patreon',

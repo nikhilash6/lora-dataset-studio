@@ -1620,6 +1620,7 @@ _RANK_CHOICES = (8, 16, 24, 32, 48, 64)
 # see the measured Krea 12B comparison at the top of this module.
 _RES_CHOICES = {
     '512,768': [512, 768],
+    '512,768,1024': [512, 768, 1024],
     '768,1024': [768, 1024],
     '1024': [1024],
     '768': [768],
@@ -4396,6 +4397,73 @@ BUILTIN_TRAIN_PRESETS = [
             'preset_steps_per_image': 100,
             'preset_steps_min': 3000,
             'preset_steps_max': 4000,
+        },
+    },
+    # The original report calls the LoKr factor its "rank". The author's follow-up
+    # confirms full-rank factor 4, cached captions and convergence around 2k-3k
+    # steps. Keep linear rank/alpha unset: full-rank LoKr overrides them upstream.
+    # LDS supplies the 50 steps/image interpolation and checkpoint cadence; those
+    # are not claimed as measurements from the report.
+    {
+        'id': 'builtin-qwenimage21-character-lokr-multires',
+        'name': 'Qwen-Image 2.1 · Character LoKr Multires',
+        'train_type': 'qwenimage21',
+        'dataset_kind': 'character',
+        'variants': [],
+        'builtin': True,
+        'approved': True,
+        'community': True,
+        'confidence': 'medium',
+        'evidence_label': 'community-tested',
+        'source_url': (
+            'https://www.reddit.com/r/StableDiffusion/comments/1x0jmuw/'
+            'my_workflow_for_realism_with_qwen_21/'),
+        'source_urls': [
+            'https://www.reddit.com/r/StableDiffusion/comments/1worox0/'
+            'my_first_qwen_21_character_loras/',
+            'https://www.reddit.com/r/StableDiffusion/comments/1x0jmuw/'
+            'my_workflow_for_realism_with_qwen_21/',
+        ],
+        'recommended_images': {'min': 30, 'max': 70, 'target': 50},
+        'recommended_steps': {'per_image': 50, 'min': 2000, 'max': 3000},
+        'checkpoint_targets': [2000, 2250, 2500, 2750, 3000],
+        'caption_guidance': (
+            'Use a consistent trigger and varied prose captions describing pose, '
+            'framing, expression and lighting; inspect likeness across contexts.'),
+        'limitations': [
+            'Reported character recipe for Qwen-Image 2.1, not an older Qwen '
+            'Image/Edit model or a style/concept recipe.',
+            'The author reports 2000-3000 steps. LDS interpolates at 50 steps/image '
+            'within that range and adds previews/checkpoints every 250 steps.',
+            'LDS keeps its convrot8 memory defaults; the report used a cloud GPU '
+            'and does not establish a minimum VRAM requirement.',
+            'Published examples also used additional inference LoRAs. Other users '
+            'reported incomplete likeness with these settings; compare checkpoints.',
+        ],
+        'description': (
+            'Community character recipe: full-rank LoKr factor 4, Automagic3, '
+            'sigmoid/Balanced, 512/768/1024 and cached captions. LDS targets '
+            '2000-3000 steps with previews every 250. Reported likeness varies; '
+            'published examples also used extra inference LoRAs.'),
+        'settings': {
+            'network_type': 'lokr',
+            'lokr_full_rank': True,
+            'lokr_factor': 4,
+            'resolution': '512,768,1024',
+            'optimizer': 'automagic3',
+            'learning_rate': 1e-4,
+            'weight_decay': 2e-4,
+            'timestep_type': 'sigmoid',
+            'content_or_style': 'balanced',
+            'batch_size': 1,
+            'cache_text_embeddings': True,
+            'save_every': 250,
+            'max_step_saves': 10,
+            'sample_every': 250,
+            'sample_prompts': list(_CHARACTER_SAMPLE_PROMPTS),
+            'preset_steps_per_image': 50,
+            'preset_steps_min': 2000,
+            'preset_steps_max': 3000,
         },
     },
     # 32/32 is the AI-Toolkit-community default and the "lower-regret choice

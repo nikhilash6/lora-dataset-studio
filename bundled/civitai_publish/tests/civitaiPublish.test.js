@@ -2,8 +2,16 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   CIVITAI_API, civitaiLinkLine, civitaiTarget, civitaiTargetKnown, civitaiVerbRefusal,
-  draftFormFrom, draftFormRefusal, jobOutcome, jobPhaseLabel, pageVersionOptions, preselectVersion,
+  deployedLoraName, draftFormFrom, draftFormRefusal, jobOutcome, jobPhaseLabel, pageVersionOptions, preselectVersion,
 } from '../frontend/lib/civitaiPublish.js';
+
+test('a picture without a run is linked by the file name its LoRA was deployed under', () => {
+  assert.equal(deployedLoraName('krea\\lora_kitty_uc_000002000_Krea-2-Raw_rc17_v2.safetensors'),
+    'lora_kitty_uc_000002000_Krea-2-Raw_rc17_v2.safetensors');
+  assert.equal(deployedLoraName('a/b/c.safetensors'), 'c.safetensors');
+  assert.equal(deployedLoraName(null), '');
+  assert.equal(CIVITAI_API.linkImage, '/api/civitai/images/link');
+});
 
 test('a looked-up page becomes a version pick: the address\'s version first, else the newest', () => {
   const page = { versions: [
@@ -109,6 +117,19 @@ test('a finished job says what happened and where — draft vs published', () =>
   assert.equal(post.text, 'Posted 1 image on Civitai.');
   const failed = jobOutcome({ state: 'error', error: 'Civitai refused the API key', error_code: 'auth' });
   assert.deepEqual(failed, { ok: false, text: 'Civitai refused the API key', code: 'auth' });
+});
+
+test('a post says whether its generation model was tagged and its data hidden', () => {
+  assert.equal(jobPhaseLabel({ kind: 'post', phase: 'identifying', progress: 0.4 }),
+    'Identifying the generation model… 40%');
+  const tagged = jobOutcome({ state: 'done', kind: 'post', result: {
+    published: true, count: 1, url: 'https://civitai.com/posts/5',
+    generation_models: ['DesireX · Amateur (Hard)'], generation_untagged: 0, hidden_meta: true } });
+  assert.equal(tagged.text, 'Posted 1 image on Civitai. The generation model is tagged too: '
+    + 'DesireX · Amateur (Hard). Its generation data is hidden on Civitai.');
+  const unknown = jobOutcome({ state: 'done', kind: 'post', result: {
+    published: true, count: 1, generation_models: [], generation_untagged: 1 } });
+  assert.match(unknown.text, /not found on Civitai, so it is not tagged/);
 });
 
 test('every verb has ONE address', () => {

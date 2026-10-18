@@ -57,6 +57,25 @@ def test_anima_uses_its_small_qwen_encoder_and_real_negative_conditioning():
     assert graph['7']['inputs']['cfg'] == 5.0
 
 
+def test_moss_matches_the_validated_runtime_and_keeps_shift_before_skip_guidance():
+    graph = _build('moss', prompt='a fox', negative='blur')
+    assert graph['1']['class_type'] == 'LDSMossUNETLoader'
+    assert graph['2']['class_type'] == 'LDSMossCLIPLoader'
+    assert graph['2']['inputs']['clip_name'] == 'qwen3.5_9b_int8_convrot.safetensors'
+    assert graph['6']['class_type'] == 'EmptyFlux2LatentImage'
+    assert graph['sampling']['inputs'] == {'model': ['1', 0], 'shift': 5.0}
+    assert graph['slg']['inputs']['model'] == ['sampling', 0]
+    assert graph['slg']['inputs']['single_layers'] == '22'
+    assert graph['7']['inputs']['model'] == ['slg', 0]
+    assert graph['7']['inputs']['steps'] == 50
+    assert graph['7']['inputs']['cfg'] == 3.0
+    assert graph['7']['inputs']['scheduler'] == 'sgm_uniform'
+    assert graph['5']['inputs']['text'] == 'blur'
+    assert _build('moss', steps=30, cfg=4)['7']['inputs']['steps'] == 30
+    with pytest.raises(ValueError, match='base model only'):
+        _build('moss', loras=[{'filename': 'moss/style.safetensors'}])
+
+
 def test_qwen21_uses_new_native_conditioner_and_rgba_vae_not_older_qwen():
     graph = _build('qwenimage21', prompt='portrait', negative='blur', batch_size=2,
                    weight_dtype='fp8_e4m3fn')

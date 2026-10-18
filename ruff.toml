@@ -48,6 +48,9 @@ ignore = [
 ]
 
 [lint.per-file-ignores]
+# Verbatim Apache-2.0 runtime pinned in lds_moss_image/NOTICE. Keep upstream
+# defaults intact; our entry point and weight adapter retain all lint checks.
+"backend/comfy_nodes/lds_moss_image/vendor/*.py" = ["B006"]
 # Tests routinely take a fixture whose name shadows a module-level alias of
 # the module under test (`ct` the import, `ct` the fixture). Pyflakes reads
 # that as a redefinition; it is the fixture doing its job.

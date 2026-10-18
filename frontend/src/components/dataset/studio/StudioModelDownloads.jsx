@@ -30,7 +30,7 @@ export default function StudioModelDownloads({ readiness, onRefresh }) {
 
   return (
     <>
-    {nodes.length > 0 && <ComfyNodeRepair nodes={nodes} onRefresh={onRefresh} />}
+    {nodes.length > 0 && <ComfyNodeRepair nodes={nodes} nodePacks={readiness.node_packs} onRefresh={onRefresh} />}
     {downloads.length > 0 && <section aria-label="Download missing models"
       className="min-w-0 space-y-3 rounded-lg border border-amber-400/40 bg-amber-400/5 p-3">
       <div className="space-y-1">

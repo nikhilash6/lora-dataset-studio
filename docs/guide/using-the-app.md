@@ -124,7 +124,7 @@ that cost hours of GPU is recoverable.
 **☁ on Hugging Face** on the board and in its card, and the app refuses to remove
 it: doing so would discard the only record of where that model is.
 
-### Testing a full model
+## Testing a full model
 
 Once the fp8 twin is in ComfyUI, the **Test Studio** lists it as a base and
 **🧪 Test in Studio** opens straight onto it, with its own sample settings filled
@@ -133,11 +133,22 @@ real CFG and a real step count (CFG 4 / 25 steps for Krea 2). The family's
 few-step Turbo defaults render a blurry sketch on it that reads as a failed
 training.
 
-One limit worth knowing before you go looking for a button that is not there:
-**the Test Studio is entered through a LoRA of the dataset.** A dataset trained
-only as a full model has none, so it cannot open the Studio at all. If you have
-any LoRA of that dataset deployed, pick it and set its **strength to 0** — no
-LoRA node is added at 0, so you generate with the bare model.
+Open **Test Studio → Base model only**, choose the **Model family** and its
+**Base model**, then enter a prompt or select a prompt batch. No trained dataset
+or LoRA is required. CFG, steps, format, seed and images per configuration work
+as usual. Images are saved in a **Test Studio · … (base model)** dataset; the
+latest run for each family reopens when you return, including Stop and Resume.
+Select a LoRA above whenever you want to test its effect or compare checkpoints.
+
+**MOSS-Image** is available in **Base model only**. It uses the SFT BF16 model,
+Qwen3.5 9B INT8 text encoder and FLUX.2 VAE. Compatible files already present in
+ComfyUI's model folders are reused. Download missing files from the Studio, and
+use **Fix missing ComfyUI nodes → Install MOSS-Image loaders** when needed.
+Let queued jobs finish, restart ComfyUI, then check the nodes again. A ComfyUI
+version with Qwen3.5 support is required. The default is 50 steps, CFG 3,
+Euler / sgm_uniform, shift 5 and negative-branch skipping at layer 22.
+This integration generates images from text; MOSS LoRA testing and photo editing
+are not exposed.
 
 ## The generation queue
 

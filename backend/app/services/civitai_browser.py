@@ -23,14 +23,20 @@ and a per-image meta cache so “Load more” and re-opens never re-ask Civitai 
 an image already seen. Continuation is exact even when a page is left half
 scanned: the response's ``next_cursor``/``next_skip`` name the first listing
 item NOT yet consumed, and the caches make the re-walk to that point free.
+
+A pasted model page link (``civitai.com`` or ``civitai.red``) narrows the same
+walk to that page's gallery: the listing filtered on its version, all time.
+The creator's showcase images are part of that gallery (measured 2026-10-17:
+10 of 10 found among the version's 263 images), so one listing covers the page.
 """
 from ..timeout_settings import network_timeout
 import json
 import logging
+import re
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
-from urllib.parse import quote, urlencode
+from urllib.parse import parse_qs, quote, urlencode, urlparse
 
 import requests
 
@@ -38,8 +44,16 @@ logger = logging.getLogger(__name__)
 
 _LIST_URL = 'https://civitai.com/api/v1/images'
 _GEN_URL = 'https://civitai.com/api/trpc/image.getGenerationData'
+_MODEL_URL = 'https://civitai.com/api/v1/models/{}'
+_VERSION_URL = 'https://civitai.com/api/v1/model-versions/{}'
 _UA = 'lora-dataset-studio/1.0 (Test Studio prompt browser)'
 _TIMEOUT = (6.1, 20)
+
+# A pasted link is read for its ids only: every request still goes to the fixed
+# API host above, so a link can never point the server anywhere else.
+# civitai.red serves the same catalog (measured: identical listings).
+_LINK_HOSTS = ('civitai.com', 'civitai.red')
+_LINK_PATH = re.compile(r'/models/([0-9]+)(?:/|$)')
 
 # Wire values are lowercase/stable; Civitai's spellings stay an implementation
 # detail so a UI select can never drift from the API's casing.
@@ -97,10 +111,17 @@ def account_name(key):
     return (account.get('username') or None) if isinstance(account, dict) else None
 
 
+class CivitaiNotFound(RuntimeError):
+    """HTTP 404. Still a RuntimeError, so every `except RuntimeError` keeps
+    treating it as one failed call; only the model link turns it into 'no
+    model at this link'."""
+
+
 def _http_get_json(url, key=None):
     """GET → parsed JSON. The single network seam (tests monkeypatch it).
     Auth/network/HTTP failures raise RuntimeError with a user-facing sentence;
-    a 401 raises PermissionError so callers can tell 'key refused' apart."""
+    a 401 raises PermissionError so callers can tell 'key refused' apart, and a
+    404 raises CivitaiNotFound."""
     headers = {'User-Agent': _UA}
     if key:
         headers['Authorization'] = f'Bearer {key}'
@@ -111,6 +132,8 @@ def _http_get_json(url, key=None):
                            'and try again.') from e
     if resp.status_code == 401:
         raise PermissionError('Civitai refused the API key.')
+    if resp.status_code == 404:
+        raise CivitaiNotFound('Civitai has nothing at this address.')
     if resp.status_code != 200:
         raise RuntimeError(f'Civitai answered HTTP {resp.status_code} - '
                            'try again in a moment.')
@@ -138,14 +161,68 @@ def _cache_put(cache, key, value, cap):
         cache[key] = (time.monotonic(), value)
 
 
-def _listing_page(period, sort, level, cursor, key):
+def parse_model_link(link):
+    """(host, model_id, version_id or None) from a Civitai model page link such
+    as ``https://civitai.red/models/2945475/some-name?modelVersionId=3372987``.
+    The scheme may be left off; any other shape raises ValueError."""
+    text = str(link or '').strip()
+    parsed = urlparse(text if '://' in text else f'https://{text}')
+    host = (parsed.hostname or '').lower().removeprefix('www.')
+    path = _LINK_PATH.match(parsed.path or '')
+    if host not in _LINK_HOSTS or not path:
+        raise ValueError('Paste a Civitai model link, like '
+                         'https://civitai.com/models/123/name?modelVersionId=456')
+    version = (parse_qs(parsed.query).get('modelVersionId') or [None])[0]
+    if version is not None and not re.fullmatch(r'[0-9]+', version):
+        raise ValueError('modelVersionId in this link is not a number')
+    return host, int(path.group(1)), int(version) if version else None
+
+
+def _model_page(model_id, version_id, key):
+    """Title and listing scope of the page a link names (cached _LIST_TTL).
+    Without a version, the page is the model's first listed version, the one
+    Civitai's own page opens on."""
+    cache_key = ('model-page', model_id, version_id)
+    page, ok = _cache_get(_list_cache, cache_key, _LIST_TTL)
+    if ok:
+        return page
+    url = _VERSION_URL.format(version_id) if version_id else _MODEL_URL.format(model_id)
+    try:
+        answer = _http_get_json(url, key=key)
+    except CivitaiNotFound:
+        raise ValueError('Civitai has no model at this link - check it and try again.')
+    except PermissionError:
+        raise RuntimeError('Civitai refused the API key - check it in '
+                           'Settings > Scraping & sources.')
+    if not isinstance(answer, dict):
+        raise RuntimeError('Civitai answered an unexpected model shape - '
+                           'try again in a moment.')
+    if version_id:
+        names = ((answer.get('model') or {}).get('name'), answer.get('name'))
+        scope = {'modelVersionId': version_id}
+    else:
+        first = next((v for v in answer.get('modelVersions') or []
+                      if isinstance(v, dict) and v.get('id')), None)
+        names = (answer.get('name'), (first or {}).get('name'))
+        scope = {'modelVersionId': first['id']} if first else {'modelId': model_id}
+    page = {'title': ' · '.join(n for n in names if n) or f'Model {model_id}',
+            'scope': scope}
+    _cache_put(_list_cache, cache_key, page, cap=64)
+    return page
+
+
+def _listing_page(period, sort, level, cursor, key, scope=None):
     """One v1 listing page (cached _LIST_TTL). The API key is sent when
-    present — harmless for the listing, and consistent with the site."""
-    cache_key = (period, sort, level, cursor)
+    present — harmless for the listing, and consistent with the site.
+    `scope` narrows it to one model page ({'modelVersionId': …})."""
+    cache_key = (period, sort, level, cursor,
+                 tuple(sorted(scope.items())) if scope else None)
     page, ok = _cache_get(_list_cache, cache_key, _LIST_TTL)
     if ok:
         return page
     params = {'limit': _PAGE_SIZE, 'sort': SORTS[sort], 'period': PERIODS[period]}
+    if scope:
+        params.update(scope)
     if level != 'none':
         params['nsfw'] = 'X' if level == 'x' else level.capitalize()
     if cursor:
@@ -244,7 +321,7 @@ def _coerce_int(value, name, default, lo, hi):
 
 
 def browse(period='week', sort='reactions', level='none', cursor=None,
-           skip=0, want=12, require_prompt=True):
+           skip=0, want=12, require_prompt=True, link=None):
     """Gather up to `want` cards starting at (`cursor`, `skip`).
 
     With a key and `require_prompt`, only prompt-bearing images become cards —
@@ -253,6 +330,9 @@ def browse(period='week', sort='reactions', level='none', cursor=None,
     exactly where it stopped. Without a key the listing is served as-is
     (prompts null) so the browser still shows the top images, and the UI can
     explain what the key unlocks.
+
+    `link` (a Civitai model page link) walks that page's gallery instead, all
+    time; sort and content ceiling still apply, and `source` names the page.
     """
     period = str(period or 'week').lower()
     sort = str(sort or 'reactions').lower()
@@ -268,11 +348,28 @@ def browse(period='week', sort='reactions', level='none', cursor=None,
     cursor = str(cursor) if cursor else None
 
     key = civitai_api_key()
+    source = scope = None
+    if link:
+        host, model_id, version_id = parse_model_link(link)
+        page = _model_page(model_id, version_id, key)
+        scope = page['scope']
+        # A page's gallery is browsed whole: the period is a top-listing filter.
+        period = 'alltime'
+        source = {'title': page['title'],
+                  'page_url': f'https://{host}/models/{model_id}'
+                              + (f'?modelVersionId={version_id}' if version_id else '')}
+    return {**_gather(period, sort, level, cursor, skip, want, require_prompt,
+                      key, scope),
+            'source': source}
+
+
+def _gather(period, sort, level, cursor, skip, want, require_prompt, key, scope):
+    """browse()'s walk, on validated arguments."""
     if not key:
         # No prompts to hunt for → serve the listing window as-is, with the
         # SAME (cursor, skip) continuation as the keyed walk: jumping straight
         # to the next page's cursor would silently skip the rest of this one.
-        page = _listing_page(period, sort, level, cursor, key=None)
+        page = _listing_page(period, sort, level, cursor, key=None, scope=scope)
         entries = [i for i in page['items'] if i.get('type') == 'image']
         served = entries[skip:skip + want]
         consumed = skip + len(served)
@@ -295,7 +392,7 @@ def browse(period='week', sort='reactions', level='none', cursor=None,
     pool = ThreadPoolExecutor(_GEN_WORKERS)
     try:
         while len(cards) < want and scanned < _MAX_LIST_ITEMS:
-            page = _listing_page(period, sort, level, next_cursor, key)
+            page = _listing_page(period, sort, level, next_cursor, key, scope)
             entries = [i for i in page['items'] if i.get('type') == 'image']
             page_next = (page.get('metadata') or {}).get('nextCursor')
             idx = next_skip

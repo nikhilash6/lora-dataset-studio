@@ -692,10 +692,12 @@ def describe_image(image_bytes: bytes, prompt: str, *,
         order = [True]
     last_status, last_body = None, ''
     for use_data_uri in order:
+        # Image first, as Ollama renders it. Measured on Qwen3-VL 8B (#74): asked
+        # before the image, framing classify answered `bust` for every shot.
         messages = [{'role': 'user', 'content': [
-            {'type': 'text', 'text': prompt},
             {'type': 'image_url',
              'image_url': {'url': _image_field(b64, use_data_uri)}},
+            {'type': 'text', 'text': prompt},
         ]}]
         try:
             _admit(endpoint, target)

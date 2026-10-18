@@ -43,6 +43,7 @@ class FakeCivitai:
         self.version_id = 3100001
         self.post_id = 30670842
         self.fail = {}           # url fragment -> (status, body dict)
+        self.hosted = {}         # sha256 -> the version /model-versions/by-hash answers
 
     def __call__(self, method, url, headers=None, data=None, json_body=None, timeout=None):
         self.calls.append((method, url, headers or {}, json_body if json_body is not None else data))
@@ -53,6 +54,10 @@ class FakeCivitai:
             return 200, {'etag': f'"etag-{len(self.calls)}"'}, b''
         if url.endswith('/api/v1/me'):
             return 200, {'date': SERVER_DATE}, json.dumps({'id': 1, 'username': 'creator'}).encode()
+        if '/api/v1/model-versions/by-hash/' in url:
+            found = self.hosted.get(url.rsplit('/', 1)[1])
+            return (200 if found else 404), {'date': SERVER_DATE}, json.dumps(
+                found or {'error': 'Model not found'}).encode()
         if '/api/trpc/' in url and method == 'POST':
             proc = url.split('/api/trpc/')[1]
             answer = {
@@ -753,6 +758,109 @@ def test_post_images_uploads_a_metadata_free_png_with_the_meta_and_publishes(cli
         assert out['published'] is True and out['count'] == 1
         assert out['url'] == cp.post_url(civitai.post_id, True)
         assert phases[-1] == ('uploading', 1.0)
+
+
+@pytest.mark.plugins('civitai_publish')
+def test_the_generation_model_is_tagged_when_civitai_hosts_its_file(client, app, civitai,
+                                                                    tmp_path, monkeypatch):
+    import hashlib
+    from app.extensions import db
+    with app.app_context():
+        ds_id = _create(client)
+        rec = _record(db, ds_id)
+        row = _image(db, ds_id, rec)
+        base = tmp_path / 'BSSDesirexKrea2_amateurHard.safetensors'
+        base.write_bytes(b'checkpoint weights')
+        civitai.hosted[hashlib.sha256(b'checkpoint weights').hexdigest()] = {
+            'id': 3367314, 'modelId': 2945475, 'name': 'Amateur (Hard)',
+            'model': {'name': 'DesireX', 'type': 'Checkpoint'}}
+        monkeypatch.setattr(cp, '_generation_model_path', lambda r: str(base))
+        monkeypatch.setattr(cp, '_data_dir', tmp_path / 'state')
+        monkeypatch.setattr(cp, '_model_cache', None)
+        link = cp.save_link(rec.id, 2500, NUMBERED, ds_id, model_id=1, version_id=civitai.version_id)
+        out = cp.post_images([row.id], link, KEY)
+        resources = civitai.body_of('post.addImage')['json']['meta']['civitaiResources']
+        assert resources == [{'type': 'lora', 'weight': 0.85, 'modelVersionId': civitai.version_id},
+                             {'type': 'checkpoint', 'modelVersionId': 3367314}]
+        assert out['generation_models'] == ['DesireX · Amateur (Hard)']
+        assert out['generation_untagged'] == 0
+        # The next post — even after a restart — reads the stored hash and answer.
+        monkeypatch.setattr(cp, '_model_cache', None)
+        cp.post_images([row.id], link, KEY)
+        assert sum('/by-hash/' in c[1] for c in civitai.calls) == 1
+        # A file Civitai does not host is posted untagged, and said so.
+        civitai.hosted.clear()
+        base.write_bytes(b'converted at home')
+        out = cp.post_images([row.id], link, KEY)
+        assert out['generation_models'] == [] and out['generation_untagged'] == 1
+        # The LoRA's own page is never named twice.
+        same = {'version_id': civitai.version_id, 'model_id': 1, 'name': 'Nova'}
+        assert len(cp.image_meta(row, None, link, 8, 8, same)['civitaiResources']) == 1
+
+
+KITTY = 'krea\\lora_kitty_uc_000002000_Krea-2-Raw_rc17_v2.safetensors'
+
+
+def _lora_page(*_a, **_k):
+    return {'id': 2798716, 'name': 'Kitty', 'type': 'LORA', 'status': 'Published',
+            'versions': [{'id': 31, 'name': 'v2'}, {'id': 30, 'name': 'v1'}]}
+
+
+@pytest.mark.plugins('civitai_publish')
+def test_a_picture_without_a_run_links_its_lora_by_its_deployed_name(client, app, civitai, monkeypatch):
+    from app.extensions import db
+    from lds_civitai_publish.models import CivitaiLink
+    with app.app_context():
+        ds_id = _create(client)
+        row = _image(db, ds_id, None, filename='k1.png', checkpoint=KITTY)
+        assert cp.link_for_image(row) is None
+        monkeypatch.setattr(cp, 'fetch_model_page', _lora_page)
+        link, _page = cp.link_image_to_page(row.id, 'https://civitai.red/models/2798716/kitty', KEY)
+        assert (link.record_id, link.step, link.dataset_id) == (None, 2000, ds_id)
+        assert link.filename == 'lora_kitty_uc_000002000_Krea-2-Raw_rc17_v2.safetensors'
+        assert link.version_id == 31          # the newest, as the address names none
+        # The next picture of the same LoRA finds the page by itself…
+        other = _image(db, ds_id, None, filename='k2.png', checkpoint=KITTY)
+        assert cp.link_for_image(other).id == link.id
+        # …and linking again retargets the same row instead of adding one.
+        again, _page = cp.link_image_to_page(other.id, '2798716', KEY, version_id=30)
+        assert again.id == link.id and again.version_id == 30
+        assert CivitaiLink.query.filter_by(dataset_id=ds_id).count() == 1
+        # Another LoRA of the dataset is never given that page.
+        assert cp.link_for_image(_image(db, ds_id, None, filename='n.png')) is None
+
+
+@pytest.mark.plugins('civitai_publish')
+def test_the_picture_door_links_its_lora_through_its_own_route(client, app, civitai, monkeypatch):
+    from app.extensions import db
+    with app.app_context():
+        ds_id = _create(client)
+        row = _image(db, ds_id, None, filename='k1.png', checkpoint=KITTY)
+        monkeypatch.setattr(cp, 'fetch_model_page', _lora_page)
+        r = client.post('/api/civitai/images/link', json={'image_id': row.id, 'url': '2798716'})
+        assert r.status_code == 200
+        link = r.get_json()['link']
+        assert link['record_id'] is None and link['version_id'] == 31
+        assert link['filename'] == 'lora_kitty_uc_000002000_Krea-2-Raw_rc17_v2.safetensors'
+        assert client.post('/api/civitai/images/link', json={'url': '2798716'}).status_code == 400
+        assert client.post('/api/civitai/images/link', json=['bad']).status_code == 400
+
+
+@pytest.mark.plugins('civitai_publish')
+def test_hidden_generation_data_uses_civitais_own_toggle_before_the_publish(client, app, civitai,
+                                                                             monkeypatch):
+    from app.extensions import db
+    with app.app_context():
+        ds_id = _create(client)
+        rec = _record(db, ds_id)
+        row = _image(db, ds_id, rec)
+        monkeypatch.setattr(cp, '_generation_model_path', lambda r: None)
+        link = cp.save_link(rec.id, 2500, NUMBERED, ds_id, model_id=1, version_id=civitai.version_id)
+        out = cp.post_images([row.id], link, KEY, hide_meta=True)
+        assert civitai.procs() == ['post.create', 'post.addImage', 'post.updateImage', 'post.update']
+        assert civitai.body_of('post.updateImage')['json'] == {
+            'id': out['images'][0]['civitai_image_id'], 'hideMeta': True}
+        assert out['hidden_meta'] is True
 
 
 @pytest.mark.plugins('civitai_publish')

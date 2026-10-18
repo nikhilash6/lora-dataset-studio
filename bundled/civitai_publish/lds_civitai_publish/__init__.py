@@ -49,8 +49,11 @@ def _drop_links_of_dataset(dataset_id):
 
 
 def register(ctx):
+    from . import publish
     from .probes import configured
     from .routes import bp
+    # The generation-model hash cache lives with the plugin's own state.
+    publish.set_data_dir(getattr(ctx, 'data_dir', None))
     ctx.register_blueprint(bp, url_prefix='/api/civitai')
     ctx.register_probe('civitai', configured)
     ctx.register_hook('lineage.checkpoints', _stamp_lineage)

@@ -21,6 +21,12 @@ import { getHelpTopic } from '../src/help/helpRegistry.js'
 import { WHATS_NEW } from '../src/whatsNew.js'
 import { WHATS_NEW_ARCHIVE } from '../src/whatsNewArchive.js'
 
+test('base model runs count render and prompt axes without a LoRA or strength selection', () => {
+  assert.equal(cellCount({ selectionCount: 0, strengthCount: 0, count: 2,
+    baseOnly: true, axisTotal: 3, promptCount: 2 }), 12)
+  assert.equal(cellCount({ selectionCount: 0, strengthCount: 0, count: 2 }), 0)
+})
+
 import canvasPlugin from '../../bundled/canvas/frontend/index.js'
 import { registerDescriptor, resetRegistry, setEnabled } from '../src/plugins/registry.js'
 test.beforeEach(() => {
@@ -104,16 +110,16 @@ test('the studio sends `combine` instead of the strength axis when the stack is 
   assert.match(source, /buildSelectionsPayload\(selection, \{ combine, weights: stackWeights, sets: stackSets \}\)/)
   // Send checked weights ALONGSIDE sliders; sliders alone would render one
   // image while the panel promises N.
-  assert.match(source, /\.\.\.\(combine \? \{ combine: true \} : \{ strengths \}\)/)
+  assert.match(source, /combine \? \{ combine: true \} : \{ strengths \}/)
   // A blocked stack participates in the complete readiness guard.
-  assert.match(source, /const launchBlocked =[\s\S]*?\|\| combineBlocked;/)
+  assert.match(source, /const launchBlocked =[\s\S]*?\|\| combineBlocked/)
   // A blocked stack must never reach the network.
-  assert.match(source, /if \(!selection\.length \|\| launchBlocked\) return/)
+  assert.match(source, /if \(\(!baseOnly && !selection\.length\) \|\| launchBlocked\) return/)
 })
 
 test('the run panel hides the strength sweep and both prompt helpers stay reachable', () => {
   const setup = readStudio('StudioRunSetup.jsx')
-  assert.match(setup, /\{!combine && \(\s*<StrengthPicker/)
+  assert.match(setup, /\{!baseOnly && !combine && \(\s*<StrengthPicker/)
   assert.match(setup, /<EnhancePromptButton prompt=\{prompt\} onResult=\{onPrompt\} \/>/)
   // The solo (single-LoRA) branch gets Enhance too, on its own prompt field.
   assert.match(readStudio('PromptField.jsx'),

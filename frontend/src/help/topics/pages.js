@@ -428,6 +428,10 @@ export const PAGE_TOPICS = [
       'z-image base', 'base vs turbo', 'cfg 1', '8 steps', 'blurry base model'],
     guide: { chapter: 'dataset-guide', anchor: '6-after-training-pick-the-right-checkpoint' },
     app: { route: '/studio' } },
+  { id: 'studio-base-model-only', kind: 'setting', title: 'Generate without a LoRA',
+    keywords: ['base model only', 'no lora', 'without lora', 'model family', 'full model', 'generate'],
+    guide: { chapter: 'using-the-app', anchor: 'testing-a-full-model' },
+    app: { route: '/studio' } },
   // The topic ID keeps the word `combine`: it is referenced from JSX and from the
   // guide, and the mode was CALLED Combine until 2026-08-03 — the keywords keep it
   // too, so anyone who read the older What's-new entry still finds this.
@@ -507,7 +511,8 @@ export const PAGE_TOPICS = [
      'no prompt published', 'prompts missing', 'civitai api key', 'load more',
      'safe mature everything', 'content level', 'top of the week',
      'batch', 'add to batch', 'tick several civitai prompts', 'run several civitai prompts',
-     'civitai prompts in one run', 'in batch'],
+     'civitai prompts in one run', 'in batch', 'civitai model link', 'paste a civitai link',
+     'model page prompts', 'prompts of a model', 'civitai.red'],
     '/studio', 'dataset-guide', '6-after-training-pick-the-right-checkpoint'),
   // One dialog, two entry points: the Canvas/run-graph checkpoint popover and
   // the shared image viewer. Keep one help topic.

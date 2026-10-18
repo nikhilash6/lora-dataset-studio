@@ -5,6 +5,8 @@
 // toggle below can widen that). Without a key the top images still show, with a
 // banner explaining what the (free) key unlocks — the credential is the same
 // one Settings → Scraping & sources already stores for the scraper.
+// 🔗 A pasted model page link swaps the top listing for that page's gallery
+// (the creator's showcase included), all time: same cards, same verbs.
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Link } from 'react-router';
@@ -50,14 +52,21 @@ export default function CivitaiBrowserModal({ open, onClose, onUse, picks = null
   const [withPrompt, setWithPrompt] = useState(() => {
     try { return localStorage.getItem('civitaiBrowse_withPrompt') !== '0'; } catch { return true; }
   });
+  // The loaded link persists like the filters; '' = the top listing.
+  const [link, setLink] = useState(() => {
+    try { return localStorage.getItem('civitaiBrowse_link') || ''; } catch { return ''; }
+  });
+  const [linkDraft, setLinkDraft] = useState(link);
+  const [source, setSource] = useState(null);       // the page the link names
   useEffect(() => {
     try {
       localStorage.setItem('civitaiBrowse_period', period);
       localStorage.setItem('civitaiBrowse_sort', sort);
       localStorage.setItem('civitaiBrowse_level', level);
       localStorage.setItem('civitaiBrowse_withPrompt', withPrompt ? '1' : '0');
+      localStorage.setItem('civitaiBrowse_link', link);
     } catch { /* private mode */ }
-  }, [period, sort, level, withPrompt]);
+  }, [period, sort, level, withPrompt, link]);
 
   const [items, setItems] = useState([]);
   const [hasKey, setHasKey] = useState(null);       // null = not known yet
@@ -77,10 +86,12 @@ export default function CivitaiBrowserModal({ open, onClose, onUse, picks = null
     try {
       const params = new URLSearchParams({ period, sort, level, want: String(WANT) });
       if (!withPrompt) params.set('require_prompt', '0');
+      if (link) params.set('link', link);
       if (cont.current.cursor) params.set('cursor', cont.current.cursor);
       if (cont.current.skip) params.set('skip', String(cont.current.skip));
       const d = await apiFetch(`/api/studio/civitai/images?${params.toString()}`);
       cont.current = { cursor: d.next_cursor || null, skip: d.next_skip || 0 };
+      setSource(d.source || null);
       setHasKey(!!d.has_key);
       setKeyRejected(!!d.key_rejected);
       setExhausted(!!d.exhausted);
@@ -96,7 +107,7 @@ export default function CivitaiBrowserModal({ open, onClose, onUse, picks = null
     } finally {
       setLoading(false);
     }
-  }, [period, sort, level, withPrompt]);
+  }, [period, sort, level, withPrompt, link]);
 
   // First open and every filter change restart the browse from the top.
   useEffect(() => { if (open) load(true); }, [open, load]);
@@ -116,6 +127,14 @@ export default function CivitaiBrowserModal({ open, onClose, onUse, picks = null
     if (next.has(id)) next.delete(id); else next.add(id);
     return next;
   });
+  // Switching between the top listing and a page starts from an empty list,
+  // so a refused link never leaves the previous cards under its error.
+  const applyLink = (next) => {
+    setLink(next);
+    setLinkDraft(next);
+    setSource(null);
+    setItems([]);
+  };
 
   const sel = 'rounded border border-border bg-app/60 px-1.5 py-1 text-content text-[0.6875rem]';
 
@@ -149,10 +168,13 @@ export default function CivitaiBrowserModal({ open, onClose, onUse, picks = null
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
-          <select value={period} onChange={(e) => setPeriod(e.target.value)}
-            aria-label="Time period" className={sel}>
-            {PERIODS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
-          </select>
+          {/* A page's gallery is read whole: the period only filters the top listing. */}
+          {!link && (
+            <select value={period} onChange={(e) => setPeriod(e.target.value)}
+              aria-label="Time period" className={sel}>
+              {PERIODS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+            </select>
+          )}
           <select value={sort} onChange={(e) => setSort(e.target.value)}
             aria-label="Sort order" className={sel}>
             {SORTS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
@@ -169,6 +191,41 @@ export default function CivitaiBrowserModal({ open, onClose, onUse, picks = null
             </label>
           )}
         </div>
+
+        <form className="flex items-center gap-2"
+          onSubmit={(e) => {
+            e.preventDefault();
+            const next = linkDraft.trim();
+            if (next && next !== link) applyLink(next);
+          }}>
+          <input type="text" inputMode="url" value={linkDraft}
+            onChange={(e) => setLinkDraft(e.target.value)}
+            placeholder="Paste a Civitai model link to browse that page"
+            aria-label="Civitai model link"
+            className={`${sel} min-w-0 flex-1 min-h-10 lg:min-h-0`} />
+          <button type="submit" disabled={!linkDraft.trim() || linkDraft.trim() === link}
+            title="Show this model page's images with their prompts"
+            className="px-2.5 py-1 min-h-10 lg:min-h-0 rounded-lg border border-border bg-app text-content-muted text-[0.6875rem] hover:text-content disabled:opacity-40">
+            Load
+          </button>
+        </form>
+        {link && (
+          <div className="flex items-center gap-2 text-[0.6875rem]" data-testid="civitai-link-source">
+            <span className="shrink-0 text-content-subtle">Model page:</span>
+            {source ? (
+              <a href={source.page_url} target="_blank" rel="noreferrer"
+                title="Open this page on Civitai"
+                className="min-w-0 truncate text-content underline decoration-dotted">{source.title}</a>
+            ) : (
+              <span className="min-w-0 truncate text-content-muted">{link}</span>
+            )}
+            <button type="button" onClick={() => applyLink('')}
+              title="Leave this page and browse the top prompts again"
+              className="ml-auto shrink-0 px-2 py-1 min-h-10 lg:min-h-0 rounded border border-border bg-app text-content-muted hover:text-content">
+              ← Top prompts
+            </button>
+          </div>
+        )}
 
         {hasKey === false && (
           <p className="m-0 rounded-lg border border-amber-400/30 bg-amber-400/5 px-3 py-2 text-[0.6875rem] leading-snug text-amber-300/90">
@@ -272,7 +329,7 @@ export default function CivitaiBrowserModal({ open, onClose, onUse, picks = null
           {!loading && !error && items.length === 0 && (
             <p className="m-0 rounded-lg border border-border bg-surface px-3 py-6 text-center text-content-subtle text-[0.75rem]">
               Nothing to show — Civitai returned no{withPrompt && hasKey ? ' prompt-bearing' : ''} images
-              for these filters. Try a longer period{withPrompt && hasKey ? ' or untick “Only images with a prompt”' : ''}.
+              for these filters. Try {link ? 'a higher content level' : 'a longer period'}{withPrompt && hasKey ? ' or untick “Only images with a prompt”' : ''}.
             </p>
           )}
 

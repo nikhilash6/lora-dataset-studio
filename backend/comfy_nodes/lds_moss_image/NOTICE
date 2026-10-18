@@ -1,0 +1,12 @@
+OpenMOSS MOSS-Image ComfyUI runtime
+Source: https://github.com/OpenMOSS/MOSS-Image
+Revision: c1355e6b1986dfe8fba3c0455783a05899212342
+Source directory: comfyui/moss-image/
+
+vendor/loaders.py, vendor/model.py and vendor/text_encoder.py are unchanged
+copies of that revision, licensed under Apache-2.0 (vendor/LICENSE).
+The LDS entry point and weight adapter are separate from the upstream code.
+Only the diffusion and text loaders are exposed; the HF directory loaders are
+not included. The adapter losslessly splits Comfy-Org BF16 fused QKV matrices
+into the separate projections used by this runtime. Quantized diffusion
+weights are not supported by this adapter. The text encoder can use INT8.

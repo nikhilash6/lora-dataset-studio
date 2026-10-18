@@ -225,6 +225,7 @@ DEFAULTS = {
     # Empty slots discover compatible local assets; explicit pins remain visible
     # as missing when moved, rather than silently choosing another model.
     'studio_models': {
+        'moss': {'diffusion_model': '', 'text_encoder': '', 'vae': ''},
         'flux': {'diffusion_model': '', 'text_encoder': '', 'text_encoder_2': '', 'vae': ''},
         'anima': {'diffusion_model': '', 'text_encoder': '', 'vae': ''},
         'qwenimage21': {'diffusion_model': '', 'text_encoder': '', 'vae': ''},

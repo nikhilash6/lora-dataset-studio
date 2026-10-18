@@ -21,7 +21,7 @@ export function defaultModelSelection(models, configuredDefault) {
 
 /** Families installed by the shared Studio model card in Engines settings. */
 export function studioModelSettingsLink(family) {
-  return ['flux', 'anima', 'qwenimage21'].includes(family)
+  return ['flux', 'anima', 'qwenimage21', 'moss'].includes(family)
     ? '#/settings?section=engines&focus=studio-models' : null;
 }
 

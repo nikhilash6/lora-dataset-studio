@@ -5,6 +5,8 @@ import { readFileSync } from 'node:fs';
 import {
   bankImportOption, bankImportOptions, promotableUrl, promoteUrl, promoteAllBody,
   banksUrl, promotableCounts, isBankJobLive, bankActivity, promoteOutcome,
+  sourceValue, parseSource, datasetSourceOptions, bankImagesUrl,
+  pickableDatasetImages, promoteSelectionBody, idBatches,
 } from './bankImport.js';
 
 // A bank that was scanned but never triaged: everything is still undecided.
@@ -116,6 +118,38 @@ test('counts are read off the list, and a bank without one stays unknown', () =>
   const [, , unknown] = bankImportOptions(banks, promotableCounts(banks));
   assert.equal(unknown.reason, 'loading');
   assert.equal(unknown.ready, false);
+});
+
+// ---- the picker: one chooser for banks and datasets, images picked one by one --
+
+test('one chooser carries both kinds of source, and a dataset is never its own', () => {
+  assert.deepEqual(parseSource(sourceValue('bank', 3)), { kind: 'bank', id: 3 });
+  assert.deepEqual(parseSource(sourceValue('dataset', '12')), { kind: 'dataset', id: 12 });
+  assert.equal(parseSource(''), null);
+  assert.deepEqual(datasetSourceOptions([
+    { id: 7, name: 'Here', images_total: 10, images_kept: 8 },
+    { id: 9, name: 'Other', images_total: 40, images_kept: 31 },
+  ], 7), [{ id: 9, name: 'Other', total: 40, kept: 31 }]);
+});
+
+test('the picker offers kept images unless All, never a row without a file', () => {
+  const images = [
+    { id: 1, filename: 'a.png', status: 'keep' },
+    { id: 2, filename: 'b.png', status: 'reject' },
+    { id: 3, filename: null, status: 'failed' },
+  ];
+  assert.deepEqual(pickableDatasetImages(images).map((i) => i.id), [1]);
+  assert.deepEqual(pickableDatasetImages(images, { all: true }).map((i) => i.id), [1, 2]);
+  assert.match(bankImagesUrl(5), /status=keep/);
+  assert.doesNotMatch(bankImagesUrl(5, { all: true, offset: 120 }), /status=/);
+  // the bank copies exactly the picked ids — an empty list would mean "all kept"
+  assert.deepEqual(promoteSelectionBody('7', [4, 9]), { dataset_id: 7, image_ids: [4, 9] });
+});
+
+test('a dataset copy goes out in batches under the server cap of 200 ids', () => {
+  const batches = idBatches(Array.from({ length: 120 }, (_, i) => i + 1));
+  assert.deepEqual(batches.flat().length, 120);
+  assert.ok(batches.every((b) => b.length > 0 && b.length <= 200));
 });
 
 // ---- wiring guards on the panel (JSX can't be imported by node --test) ------

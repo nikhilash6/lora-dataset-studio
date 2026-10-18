@@ -3,8 +3,7 @@
  * Test Studio shell keeps LoraPicker visible and switches by selection count. Two or more LoRAs
  * use ComparisonStudio with run_id, LoRA-column/strength-row grid and rankings. One uses
  * LegacyDatasetStudio with the selected dataset and its full setup/results/best settings/base
- * comparisons/presets/checkpoint statistics. Zero uses legacy Studio for a URL-preselected
- * dataset, otherwise asks for a selection. Adding/removing a second LoRA changes branches.
+ * comparisons/presets/checkpoint statistics. Zero generates with the base model alone.
  * Separate components call their own hooks unconditionally and remount to reset state cleanly.
  * Legacy /dataset/studio/:id supplies preselectDataset, immediately preserving the old full Studio
  * while the picker preselects that LoRA.
@@ -22,10 +21,23 @@ export default function StudioShell({ preselectDataset = null, preselectFamily =
   const preselect = preselectDataset ?? datasetId;
 
   const [selection, setSelection] = useState([]);
-  const onSelectionChange = useCallback((sel) => setSelection(sel), []);
+  const [baseFamily, setBaseFamily] = useState(preselectFamily || 'zimage');
+  const [families, setFamilies] = useState([]);
+  const onSelectionChange = useCallback((sel) => {
+    setSelection(sel);
+    if (sel.length) setBaseFamily(sel[0].family || sel[0].train_type);
+  }, []);
+  useEffect(() => {
+    let cancelled = false;
+    fetch('/api/studio/families', { credentials: 'include' })
+      .then((r) => r.ok ? r.json() : null)
+      .then((d) => { if (!cancelled && d?.families) setFamilies(d.families); })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, []);
 
-  // Run train_type comes from the first selected LoRA, or null with no selection.
-  const runType = selection.length > 0 ? (selection[0].family || selection[0].train_type) : null;
+  const baseOnly = selection.length === 0;
+  const runType = !baseOnly ? (selection[0].family || selection[0].train_type) : baseFamily;
 
   // Base list for current train_type; fetch /api/studio/base-models?type=... whenever runType
   // changes.
@@ -78,9 +90,7 @@ export default function StudioShell({ preselectDataset = null, preselectFamily =
   }, [runType, modelRevision]);
 
   const comparison = selection.length >= 2;
-  // Single-LoRA branch uses its dataset. With no selection, fall back to the URL-preselected
-  // dataset, or show the selection prompt.
-  const soloDatasetId = selection.length === 1 ? selection[0].dataset_id : preselect;
+  const soloDatasetId = selection.length === 1 ? selection[0].dataset_id : null;
   // Use the selected ROW's family so solo Studio opens the intended pipeline, such as Krea,
   // instead of the dataset's default train_type.
   const soloFamily = selection.length === 1 ? selection[0].family : preselectFamily;
@@ -107,24 +117,35 @@ export default function StudioShell({ preselectDataset = null, preselectFamily =
           onSelectionChange={onSelectionChange} />
       </div>
 
-      {comparison ? (
-        <ComparisonStudio key={runType} selection={selection} baseModels={baseModels} axes={axes}
+      {baseOnly && (
+        <label className="flex items-center gap-2 text-sm text-content">
+          Model family <HelpBadge topic="studio-base-model-only" />
+          <select aria-label="Model family" value={baseFamily}
+            onChange={(e) => setBaseFamily(e.target.value)}
+            className="rounded border border-border bg-surface px-2 py-1">
+            {(families.length ? families : [{ id: baseFamily, label: baseFamily }]).map((f) => (
+              <option key={f.id} value={f.id}>{f.label}</option>
+            ))}
+          </select>
+        </label>
+      )}
+
+      {comparison || baseOnly ? (
+        <ComparisonStudio key={`${runType}:${baseOnly}`} baseOnly={baseOnly}
+          selection={selection} baseModels={baseModels} axes={axes}
+          initialBase={baseOnly && runType === (preselectFamily || 'zimage') ? preselectBase : null}
           modelDefaults={modelDefaults} runType={runType} baseNote={baseNote}
           generationCapabilities={generationCapabilities}
           generationReadiness={generationReadiness}
           defaultModel={defaultModel}
           onRefreshModels={() => setModelRevision((revision) => revision + 1)}
           settingsError={loadedFamily === runType ? null : (baseError || 'Loading model settings…')} />
-      ) : soloDatasetId ? (
+      ) : (
         // key forces a clean remount when the solo LoRA OR family changes, resetting full-Studio
         // hooks/state instead of retaining the previous grid.
         <LegacyDatasetStudio key={`${soloDatasetId}:${soloFamily ?? 'default'}`}
           datasetId={String(soloDatasetId)} initialFamily={soloFamily}
           initialBase={preselectBase} />
-      ) : (
-        <p className="text-content-subtle text-sm rounded-lg border border-border bg-surface px-3 py-6 text-center">
-          Check a LoRA above to tune and test it. Check ≥2 to compare them side by side.
-        </p>
       )}
     </div>
   );
