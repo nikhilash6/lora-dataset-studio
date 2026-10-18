@@ -43,15 +43,19 @@ open a GitHub issue with the *Feature request* template.
 
 ## Support the project
 
-LoRA Dataset Studio is free, open source and built in the open. We need funding
-to keep developing it, testing APIs and renting test GPUs.
+LoRA Dataset Studio is built in the open, and the version you have stays free
+and keeps working. New features, exclusive plugins and LDS updates are reserved
+for [Patreon](https://www.patreon.com/c/Loraperfectgf) members (**LDS Member**).
 
-**Monthly support** on [Patreon](https://www.patreon.com/c/Loraperfectgf) is the
-best way to help us plan continued development. Even €1 a month makes a difference.
-You can also support the project through
-[GitHub Sponsors](https://github.com/sponsors/perfectgf).
+Connect Patreon under **Plugins → Purchases**. Members-only plugins then install
+from the Store like any other plugin, and new LDS versions appear under
+**Settings → Maintenance → Updates**. Installed plugins and the installed LDS
+version keep working if a membership ends; new downloads and updates need an
+active membership. You can also support development through
+[GitHub Sponsors](https://github.com/sponsors/perfectgf); it does not include
+the Patreon membership benefits.
 
-The small support message on the datasets page can be dismissed. These links
+The small Patreon announcement on the datasets page can be dismissed. These links
 remain available through **Help & guide → Support LDS**.
 The best free ways to help are just as welcome: report bugs, share ideas on
 Discord, and star the repo.
