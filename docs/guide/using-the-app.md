@@ -140,6 +140,16 @@ as usual. Images are saved in a **Test Studio · … (base model)** dataset; the
 latest run for each family reopens when you return, including Stop and Resume.
 Select a LoRA above whenever you want to test its effect or compare checkpoints.
 
+**MOSS-Image** is available in **Base model only**. It uses the SFT BF16 model,
+Qwen3.5 9B INT8 text encoder and FLUX.2 VAE. Compatible files already present in
+ComfyUI's model folders are reused. Download missing files from the Studio, and
+use **Fix missing ComfyUI nodes → Install MOSS-Image loaders** when needed.
+Let queued jobs finish, restart ComfyUI, then check the nodes again. A ComfyUI
+version with Qwen3.5 support is required. The default is 50 steps, CFG 3,
+Euler / sgm_uniform, shift 5 and negative-branch skipping at layer 22.
+This integration generates images from text; MOSS LoRA testing and photo editing
+are not exposed.
+
 ## The generation queue
 
 Everything that renders locally goes through one queue: your ComfyUI runs a

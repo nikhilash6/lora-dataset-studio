@@ -1,12 +1,15 @@
 import { useEffect, useId, useRef, useState } from 'react';
 import { apiFetch } from '../../api/fetchClient';
 import { HelpBadge } from '../../help/HelpMode';
+import InstallRunner from './InstallRunner';
 
 const UPDATE_GUIDE = 'https://docs.comfy.org/installation/update_comfyui';
 const PORTABLE_RELEASES = 'https://github.com/Comfy-Org/ComfyUI/releases/latest';
 const MODEL_PATHS = 'https://docs.comfy.org/installation/comfyui_portable_windows#adding-extra-model-paths';
 const buttonClass = 'min-h-10 rounded-md border border-border px-3 py-1.5 text-xs text-content hover:bg-surface-raised disabled:opacity-50';
 const linkClass = 'break-words text-xs text-content underline';
+// Only reviewed optional packs get an installer here.
+const NODE_INSTALL_ACTIONS = new Set(['moss_nodes']);
 
 export function safeComfyLink(value) {
   if (typeof value !== 'string' || !/^https?:\/\//i.test(value.trim())
@@ -37,6 +40,8 @@ export default function ComfyNodeRepair({ nodes = [], nodePacks = [], onRefresh 
   const packs = Array.isArray(nodePacks) ? nodePacks : [];
   const custom = names.map((name) => packs.find((pack) => pack.class_type === name && !pack.core))
     .filter(Boolean);
+  const installGroups = custom.filter((pack, index) => !pack.install_action
+    || custom.findIndex((other) => other.install_action === pack.install_action) === index);
   const hasCore = names.some((name) => !custom.some((pack) => pack.class_type === name));
   const currentResult = result?.key === namesKey ? result : null;
   const resolved = currentResult?.missing.length === 0;
@@ -118,10 +123,16 @@ export default function ComfyNodeRepair({ nodes = [], nodePacks = [], onRefresh 
           {comfyUrl && <a href={comfyUrl} target="_blank" rel="noopener noreferrer" className={linkClass}>Open ComfyUI</a>}
           {addressError && <p role="alert" className="break-words text-red-400">{addressError}</p>}
           <p>Let running and queued jobs finish before closing ComfyUI.</p>
-          {custom.map((pack) => (
+          {installGroups.map((pack) => (
             <div key={pack.class_type} className="space-y-1">
               <p><code className="break-all">{pack.class_type}</code> needs <b>{pack.pack}</b>.</p>
-              {safeComfyLink(pack.url) ? (
+              {NODE_INSTALL_ACTIONS.has(pack.install_action) ? (
+                <>
+                  <InstallRunner action={pack.install_action} buttonLabel={`Install ${pack.pack}`} onDone={onRefresh} />
+                  <p>Let running and queued jobs finish, restart ComfyUI, then use “Check nodes again”.
+                    {' MOSS uses the bundled LDS loaders and requires ComfyUI with Qwen3.5 support.'}</p>
+                </>
+              ) : safeComfyLink(pack.url) ? (
                 <>
                   <p>In ComfyUI-Manager, search for “{pack.search || pack.pack}” and install that package.
                     Restart ComfyUI when installation finishes.</p>

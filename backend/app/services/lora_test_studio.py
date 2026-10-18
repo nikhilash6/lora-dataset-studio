@@ -173,7 +173,7 @@ _STUDIO_ASPECT_TO_GENERATE = {
     '9:16': 'portrait', '3:4': 'portrait', '1:1': 'square',
     '4:3': 'landscape', '16:9': 'landscape',
 }
-_MODE_LABEL_BY_FAMILY = {**FAMILY_LABELS, 'krea': 'Krea 2 Turbo'}
+_MODE_LABEL_BY_FAMILY = {**FAMILY_LABELS, 'krea': 'Krea 2 Turbo', 'moss': 'MOSS-Image'}
 DEFAULT_ASPECT = '9:16'
 # Resolution tiers match resolution.py/_TIERS; None preserves the legacy fixed dimensions.
 RESOLUTION_TIERS = ('fast', 'standard', 'hq', 'max')
@@ -318,7 +318,7 @@ def studio_model_defaults(family, models) -> dict:
     family that needs it has nowhere else to put it."""
     fam = (family or '').lower()
     resolver = {'zimage': zimage_model_defaults, 'krea': krea_model_defaults}.get(fam)
-    if fam in TRAINED_IMAGE_FAMILIES or fam == 'flux2klein':
+    if fam in MANAGED_IMAGE_FAMILIES or fam == 'flux2klein':
         resolver = lambda model: studio_family_defaults(fam)
     if resolver is None:
         return {}
@@ -499,12 +499,13 @@ FAMILIES = ('zimage', 'sdxl', 'krea', 'flux', 'flux2klein', 'anima', 'qwenimage2
 # and base allowlist. Conflating these lists exposed an unusable Klein Generate
 # choice that silently failed through the Z-Image path (issue #53).
 TRAINED_IMAGE_FAMILIES = ('flux', 'anima', 'qwenimage21')
-GENERATION_FAMILIES = ('zimage', 'sdxl', 'krea', 'flux2klein') + TRAINED_IMAGE_FAMILIES
+MANAGED_IMAGE_FAMILIES = TRAINED_IMAGE_FAMILIES + ('moss',)
+GENERATION_FAMILIES = ('zimage', 'sdxl', 'krea', 'flux2klein') + MANAGED_IMAGE_FAMILIES
 
 
 def studio_family_defaults(family):
     """Defaults shared by the axes, persisted cells and graph builders."""
-    if family in TRAINED_IMAGE_FAMILIES:
+    if family in MANAGED_IMAGE_FAMILIES:
         from ..utils.trained_image_workflows import family_defaults
         defaults = family_defaults(family)
         return {'cfg': defaults['cfg'], 'steps': defaults['steps']}
@@ -514,7 +515,7 @@ def studio_family_defaults(family):
 
 
 def generation_capabilities(family):
-    return {'negative_prompt': family in ('zimage', 'anima', 'qwenimage21')}
+    return {'negative_prompt': family in ('zimage', 'anima', 'qwenimage21', 'moss')}
 
 
 def family_base_models(family):
@@ -527,7 +528,7 @@ def family_base_models(family):
         from ..utils.comfyui import get_flux2_klein_models
         return [None] + [m['filename'] if isinstance(m, dict) else m
                          for m in get_flux2_klein_models()]
-    if family in TRAINED_IMAGE_FAMILIES:
+    if family in MANAGED_IMAGE_FAMILIES:
         from .trained_image_models import list_family_models
         return [m['filename'] for m in list_family_models(family)]
     if family == 'zimage':
@@ -548,7 +549,7 @@ def _select_base_models(models, z_model=None, z_models=None, *, family=None):
     if z_models is not None and not isinstance(z_models, (list, tuple)):
         raise ValueError('base models must be a list')
     requested = list(z_models) if z_models else ([z_model] if z_model else [])
-    if not requested and family in TRAINED_IMAGE_FAMILIES:
+    if not requested and family in MANAGED_IMAGE_FAMILIES:
         from .trained_image_models import resolve_family_assets
         requested = [resolve_family_assets(family)['diffusion_model']]
     requested = [None if m in ('', None) else m for m in requested]
@@ -1719,7 +1720,7 @@ def _build_cell_workflow(user_id, checkpoint, strength, prompt, seed, z_model,
     fname = f"{user_id}_{ds_tag}LoraTest_{uuid.uuid4().hex[:8]}"
     extra_loras = extra_loras or []
     family = (train_type or 'zimage').lower()
-    if family in TRAINED_IMAGE_FAMILIES:
+    if family in MANAGED_IMAGE_FAMILIES:
         from ..utils.trained_image_workflows import build_trained_image_workflow
         from .trained_image_models import resolve_family_assets
         bases = family_base_models(family)
@@ -2137,6 +2138,8 @@ def _preflight_checkpoint_arch(run_family, checkpoints):
 # under any (a UNET lives in unet/ OR diffusion_models/ on shared installs). Only
 # loaders the studio workflows actually use are mapped.
 _STUDIO_MODEL_LOADERS = {
+    'LDSMossUNETLoader': (('unet_name',), ('diffusion_models', 'unet'), 'diffusion model'),
+    'LDSMossCLIPLoader': (('clip_name',), ('text_encoders', 'clip'), 'text encoder'),
     'UNETLoader': (('unet_name',), ('unet', 'diffusion_models'), 'diffusion model'),
     'CheckpointLoaderSimple': (('ckpt_name',), ('checkpoints',), 'checkpoint'),
     'VAELoader': (('vae_name',), ('vae',), 'VAE'),
@@ -2333,6 +2336,14 @@ def preflight_family(family, workflows):
 # restart ComfyUI". Same spirit as klein_edit_helper.KLEIN_NODE_PACKS; an unknown
 # node simply gets no hint (the generic message still shows), never an error.
 STUDIO_NODE_PACKS = {
+    'LDSMossUNETLoader': {
+        'pack': 'MOSS-Image loaders', 'install_action': 'moss_nodes',
+        'setup': 'Test Studio → Fix missing ComfyUI nodes',
+    },
+    'LDSMossCLIPLoader': {
+        'pack': 'MOSS-Image loaders', 'install_action': 'moss_nodes',
+        'setup': 'Test Studio → Fix missing ComfyUI nodes',
+    },
     # Krea 2 conditioning rebalance — RETIRED from the shipped graphs on 2026-09-02
     # (utils/comfyui, "Retired"). The hint stays: a user template or a Canvas plugin
     # graph may still name the class, and the pack is published by BOTH the original
@@ -2446,7 +2457,7 @@ def _preflight_run(user_id, run_family, checkpoint, bases, allowed, prompt, seed
                 dataset_id=dataset_id, train_type=run_family, trigger_word=trigger_word,
                 sampler_preset=sampler_preset))
         except Exception as e:  # noqa: BLE001 — a bad representative build ≠ a missing asset
-            if _base_model_family(checkpoint) or run_family in TRAINED_IMAGE_FAMILIES:
+            if _base_model_family(checkpoint) or run_family in MANAGED_IMAGE_FAMILIES:
                 raise
             logger.warning('studio preflight: representative build failed (base=%r): %s', base, e)
     preflight_family(run_family, wfs)
@@ -3883,7 +3894,7 @@ def resume_run(user_id, dataset_id=None, run_id=None) -> dict:
                                                                 if _stack_trigs
                                                                 else getattr(cell_ds, 'trigger_word', None))),
                                             available_classes=available_classes)
-            if cell_family in TRAINED_IMAGE_FAMILIES:
+            if cell_family in MANAGED_IMAGE_FAMILIES:
                 preflight_family(cell_family, [workflow])
             job_id = _enqueue_cell(user_id, img.dataset_id, workflow, prompt,
                                    cell_id=img.id, run_id=img.run_id)
@@ -5089,7 +5100,7 @@ def studio_payload(user_id, dataset_id, family=None) -> dict | None:
                                                 if m else 'Default model')}
                     for m in family_base_models(eff)]
     generation_state = {}
-    if eff in TRAINED_IMAGE_FAMILIES:
+    if eff in MANAGED_IMAGE_FAMILIES:
         from .trained_image_models import generation_readiness
         readiness = generation_readiness(eff)
         generation_state = {'generation_readiness': readiness,

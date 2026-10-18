@@ -40,12 +40,13 @@ const family = (id, label) => ({
 test('each newly supported family presents its own missing models and installer', () => {
   const html = renderLoaded([
     family('flux', 'FLUX.1'), family('anima', 'Anima'), family('qwenimage21', 'Qwen-Image 2.1'),
+    family('moss', 'MOSS-Image'),
   ]);
-  for (const label of ['FLUX.1', 'Anima', 'Qwen-Image 2.1']) {
+  for (const label of ['FLUX.1', 'Anima', 'Qwen-Image 2.1', 'MOSS-Image']) {
     assert.ok(html.includes(`aria-label="${label} Diffusion model"`));
   }
-  assert.equal((html.match(/>Install Diffusion model</g) || []).length, 3);
-  assert.equal((html.match(/Model files needed/g) || []).length, 3);
+  assert.equal((html.match(/>Install Diffusion model</g) || []).length, 4);
+  assert.equal((html.match(/Model files needed/g) || []).length, 4);
   assert.ok(html.includes('Model files alone do not confirm readiness.'));
 });
 

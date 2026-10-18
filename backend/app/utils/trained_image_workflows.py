@@ -25,6 +25,16 @@ def _asset(kind, filename, repo_id, repo_file=None, *, alternatives=(), label=No
 
 
 ASSET_SPECS = {
+    'moss': {
+        'diffusion_model': _asset('diffusion_models', 'moss_image_sft_bf16.safetensors',
+                                 'Comfy-Org/MOSS-Image', 'diffusion_models/moss_image_sft_bf16.safetensors',
+                                 alternatives=('moss_image_base_bf16.safetensors',), label='MOSS-Image SFT BF16'),
+        'text_encoder': _asset('text_encoders', 'qwen3.5_9b_int8_convrot.safetensors',
+                              'Comfy-Org/MOSS-Image', 'text_encoders/qwen3.5_9b_int8_convrot.safetensors',
+                              label='Qwen3.5 9B INT8'),
+        'vae': _asset('vae', 'flux2-vae.safetensors', 'Comfy-Org/MOSS-Image',
+                      'vae/flux2-vae.safetensors', label='FLUX.2 VAE'),
+    },
     'flux': {
         'diffusion_model': _asset('diffusion_models', 'flux1-dev.safetensors',
                                  'Comfy-Org/flux1-dev', label='FLUX.1 dev diffusion model'),
@@ -69,6 +79,7 @@ ASSET_SPECS = {
 # Remote sizes from the publishers' Hugging Face tree API. These prevent the
 # installer from requiring a full diffusion model's disk budget for tiny VAEs.
 _ASSET_BYTES = {
+    'moss': {'diffusion_model': 10164655808, 'text_encoder': 9748121532, 'vae': 336211292},
     'flux': {'diffusion_model': 23802932552, 'text_encoder': 9787841024,
              'text_encoder_2': 246144152, 'vae': 335304388},
     'anima': {'diffusion_model': 4182218328, 'text_encoder': 1192135096,
@@ -82,6 +93,7 @@ for _fam, _slots in _ASSET_BYTES.items():
         ASSET_SPECS[_fam][_slot]['min_free_gb'] = math.ceil(_size / 1024**3) + 1
 
 DEFAULTS = {
+    'moss': {'steps': 50, 'cfg': 3.0, 'sampler': 'euler', 'scheduler': 'sgm_uniform'},
     'flux': {'steps': 20, 'cfg': 3.5, 'sampler': 'euler', 'scheduler': 'simple'},
     'anima': {'steps': 30, 'cfg': 4.0, 'sampler': 'euler', 'scheduler': 'simple'},
     'qwenimage21': {'steps': 25, 'cfg': 1.0, 'sampler': 'euler', 'scheduler': 'simple'},
@@ -90,6 +102,9 @@ DEFAULTS = {
 _COMMON_NODES = ('UNETLoader', 'VAELoader', 'KSampler', 'VAEDecode', 'SaveImage',
                  'LoraLoaderModelOnly')
 REQUIRED_NODES = {
+    'moss': ('LDSMossUNETLoader', 'LDSMossCLIPLoader', 'VAELoader', 'CLIPTextEncode',
+             'EmptyFlux2LatentImage', 'ModelSamplingSD3', 'SkipLayerGuidanceDiTSimple',
+             'KSampler', 'VAEDecode', 'SaveImage'),
     'flux': (*_COMMON_NODES, 'DualCLIPLoader', 'CLIPTextEncode', 'FluxGuidance',
              'ModelSamplingFlux', 'EmptySD3LatentImage'),
     'anima': (*_COMMON_NODES, 'CLIPLoader', 'CLIPTextEncode', 'EmptyLatentImage'),
@@ -169,6 +184,8 @@ def build_trained_image_workflow(
         raise ValueError('LoRAs must be a list')
     if loras and allowed_loras is None:
         raise ValueError('LoRA selections require an explicit family allowlist')
+    if family == 'moss' and loras:
+        raise ValueError('MOSS generation currently uses the base model only')
 
     width = _number(width, 1024, 64, 4096, 'width', integer=True)
     height = _number(height, 1024, 64, 4096, 'height', integer=True)
@@ -199,6 +216,10 @@ def build_trained_image_workflow(
         '6': {'class_type': 'EmptySD3LatentImage' if family == 'flux' else 'EmptyLatentImage',
               'inputs': {'width': width, 'height': height, 'batch_size': batch_size}},
     }
+    if family == 'moss':
+        workflow['1'] = {'class_type': 'LDSMossUNETLoader', 'inputs': {
+            'unet_name': resolved['diffusion_model']}}
+        workflow['6']['class_type'] = 'EmptyFlux2LatentImage'
     previous = '1'
     for index, item in enumerate(loras):
         if not isinstance(item, dict):
@@ -214,7 +235,10 @@ def build_trained_image_workflow(
             'model': [previous, 0], 'lora_name': name, 'strength_model': strength}}
         previous = node_id
 
-    if family == 'flux':
+    if family == 'moss':
+        workflow['2'] = {'class_type': 'LDSMossCLIPLoader', 'inputs': {
+            'clip_name': resolved['text_encoder']}}
+    elif family == 'flux':
         workflow['2'] = {'class_type': 'DualCLIPLoader', 'inputs': {
             'clip_name1': resolved['text_encoder_2'], 'clip_name2': resolved['text_encoder'],
             'type': 'flux', 'device': 'default'}}
@@ -234,6 +258,13 @@ def build_trained_image_workflow(
                 'clip': ['2', 0], 'text': str(text or '')}}
         positive, negative_link = ['4', 0], ['5', 0]
     sampler_cfg = cfg
+    if family == 'moss':
+        workflow['sampling'] = {'class_type': 'ModelSamplingSD3', 'inputs': {
+            'model': [previous, 0], 'shift': 5.0}}
+        workflow['slg'] = {'class_type': 'SkipLayerGuidanceDiTSimple', 'inputs': {
+            'model': ['sampling', 0], 'double_layers': '', 'single_layers': '22',
+            'start_percent': 0.0, 'end_percent': 1.0}}
+        previous = 'slg'
     if family == 'flux':
         sampler_cfg = 1.0
         workflow['guidance'] = {'class_type': 'FluxGuidance', 'inputs': {

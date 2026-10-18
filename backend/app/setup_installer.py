@@ -303,6 +303,10 @@ _NODE_PACKS = {
 # up running last month's sampler against this month's graph. One flag would have
 # hidden an inverted rule inside a shared code path.
 _BUNDLED_NODE_PACKS = {
+    'moss_nodes': {
+        'pack': 'MOSS-Image loaders',
+        'folder': 'lds_moss_image',
+    },
     'krea_sampler_nodes': {
         'pack': 'Krea 2 preset sampler',
         'folder': 'lds_krea_sampler',

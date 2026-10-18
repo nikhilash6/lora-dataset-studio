@@ -41,6 +41,26 @@ def test_flux_does_not_offer_flux2_klein_or_krea(model_tree):
     assert [m['filename'] for m in models.list_family_models('flux')] == ['flux1-dev.safetensors']
 
 
+def test_moss_reuses_shared_files_and_reports_its_loader_preparation(model_tree, monkeypatch):
+    root, _ = model_tree
+    for spec in models.ASSET_SPECS['moss'].values():
+        weights(root / 'shared' / spec['kind'] / spec['filename'])
+    for filename in ('moss_image_base_bf16.safetensors', 'moss_image_sft_int8_convrot.safetensors',
+                     'moss_image_fp8.safetensors', 'other.safetensors'):
+        weights(root / 'diffusion_models' / filename)
+    offered = [item['filename'] for item in models.list_family_models('moss')]
+    assert offered == ['moss_image_sft_bf16.safetensors', 'moss_image_base_bf16.safetensors']
+    from app.utils import comfyui
+    required = set(models.REQUIRED_NODES['moss'])
+    monkeypatch.setattr(comfyui, 'fetch_object_info_classes', lambda: required - {'LDSMossUNETLoader'})
+    status = models.generation_readiness('moss')
+    assert status['models_ready'] and status['downloads'] == []
+    assert status['node_packs'][0]['install_action'] == 'moss_nodes'
+    from app import setup_installer
+    assert setup_installer.known_action('moss_nodes')
+    assert setup_installer._krea_asset_already_installed('studio_moss_text_encoder')
+
+
 def test_family_folder_does_not_reclassify_an_unrelated_model(model_tree):
     root, _ = model_tree
     weights(root / 'diffusion_models' / 'anima' / 'z_image_turbo.safetensors')
@@ -92,7 +112,7 @@ def test_corrupt_existing_file_is_not_treated_as_installed(model_tree):
     assert not models.generation_readiness('anima', check_nodes=False)['models_ready']
 
 
-@pytest.mark.parametrize('family', ('flux', 'anima', 'qwenimage21'))
+@pytest.mark.parametrize('family', ('flux', 'anima', 'qwenimage21', 'moss'))
 def test_readiness_requires_assets_and_actual_native_nodes(model_tree, monkeypatch, family):
     root, _ = model_tree
     for spec in models.ASSET_SPECS[family].values():
@@ -127,7 +147,7 @@ def test_settings_catalog_preserves_controls_when_one_pin_is_invalid(model_tree,
     catalog = models.settings_catalog()
     anima = next(f for f in catalog if f['family'] == 'anima')
     assert anima['config_error'] and len(anima['slots']) == 3
-    assert len(catalog) == 3
+    assert len(catalog) == 4
 
 
 def test_download_details_offer_only_actions_that_repair_the_resolved_family(model_tree):

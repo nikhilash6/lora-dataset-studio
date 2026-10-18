@@ -15,7 +15,7 @@ import pytest
 _ST = struct.pack('<Q', 2) + b'{}'
 
 
-@pytest.mark.parametrize('family', ('zimage', 'sdxl', 'krea', 'flux2klein', 'flux', 'anima', 'qwenimage21'))
+@pytest.mark.parametrize('family', ('zimage', 'sdxl', 'krea', 'flux2klein', 'flux', 'anima', 'qwenimage21', 'moss'))
 def test_base_only_workflows_need_no_lora_and_have_connected_nodes(app, monkeypatch, tmp_path, family):
     from app import config
     from app.services import lora_test_studio as lts, trained_image_models

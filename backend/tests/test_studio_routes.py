@@ -7,6 +7,7 @@ of the gate, since those are covered end-to-end by test_studio_service.py.
 """
 import json
 import os
+import pytest
 
 
 def _create(client, name='Nova', trigger='nova'):
@@ -55,7 +56,8 @@ def test_studio_run_invalid_params_still_400(client, monkeypatch):
     assert resp.get_json()['error'] == 'no LoRA selected'
 
 
-def test_base_model_run_without_dataset_keeps_prompt_axes_and_can_resume(client, monkeypatch):
+@pytest.mark.parametrize('family', ('zimage', 'moss'))
+def test_base_model_run_without_dataset_keeps_prompt_axes_and_can_resume(client, monkeypatch, family):
     from app.config import LOCAL_USER
     from app.extensions import db
     from app.models import FaceDataset, LoraTestImage
@@ -70,7 +72,7 @@ def test_base_model_run_without_dataset_keeps_prompt_axes_and_can_resume(client,
     built = []
     monkeypatch.setattr(lts, '_build_cell_workflow', lambda *a, **k: built.append((a, k)) or {'1': {}})
     monkeypatch.setattr(lts.queue_manager, 'add_job', lambda **k: None)
-    body = {'base_only': True, 'family': 'zimage', 'z_model': 'base.safetensors',
+    body = {'base_only': True, 'family': family, 'z_model': 'base.safetensors',
             'prompts': ['a fox', 'a dragon'], 'seed': 123, 'count': 2,
             'cfgs': [1], 'steps_list': [8], 'aspects': ['1:1']}
     # No dataset, trained checkpoint, strength selection or trigger is needed.
@@ -93,15 +95,15 @@ def test_base_model_run_without_dataset_keeps_prompt_axes_and_can_resume(client,
     status = client.get(f"/api/studio/run/{result['run_id']}/status").get_json()
     assert status['base_only'] is True
     assert all(c['label'] == 'Base model' for c in status['cells'])
-    assert all(c['checkpoint'] is None and c['strength'] is None and c['family'] == 'zimage'
+    assert all(c['checkpoint'] is None and c['strength'] is None and c['family'] == family
                for c in status['cells'])
     resumed = client.post(f"/api/studio/run/{result['run_id']}/resume")
     assert resumed.status_code == 200, resumed.get_json()
     assert len(built) == 8
-    assert all(k['train_type'] == 'zimage' and k['trigger_word'] is None for _, k in built)
+    assert all(k['train_type'] == family and k['trigger_word'] is None for _, k in built)
     # An empty prompt has no dataset identity to fall back to, and unsupported families fail early.
     assert client.post('/api/studio/run', json={**body, 'prompts': []}).status_code == 400
-    assert client.post('/api/studio/run', json={**body, 'family': 'moss'}).status_code == 400
+    assert client.post('/api/studio/run', json={**body, 'family': 'unknown-family'}).status_code == 400
     assert client.post('/api/studio/run', json={**body, 'z_model': '../bad'}).status_code == 400
 
 
@@ -113,6 +115,26 @@ def test_studio_run_reachable_forwards_to_service(client, monkeypatch):
     assert resp.status_code == 200
     body = resp.get_json()
     assert body == {'ok': True, 'created': 2, 'seed': 42, 'count': 1, 'run_id': 'r1'}
+
+
+def test_moss_picker_uses_its_own_defaults_and_generation_readiness(client, monkeypatch):
+    from app.services import lora_test_studio as lts, trained_image_models
+    filename = 'moss_image_sft_bf16.safetensors'
+    monkeypatch.setattr(lts, 'family_base_models', lambda family: [filename])
+    monkeypatch.setattr(trained_image_models, 'generation_readiness', lambda family: {
+        'assets': {'diffusion_model': filename}, 'models_ready': True,
+        'missing_nodes': ['LDSMossUNETLoader'], 'downloads': [],
+        'node_packs': lts.studio_missing_node_hints(['LDSMossUNETLoader'])})
+    families = client.get('/api/studio/families').get_json()['families']
+    assert {'id': 'moss', 'label': 'MOSS-Image'} in families
+    assert 'moss' not in lts.FAMILIES  # Generation does not advertise a training pipeline.
+    response = client.get('/api/studio/base-models?type=moss')
+    assert response.status_code == 200
+    data = response.get_json()
+    assert data['axes']['default_steps'] == 50 and data['axes']['default_cfg'] == 3
+    assert data['default_model'] == filename
+    assert data['generation_capabilities']['negative_prompt']
+    assert data['generation_readiness']['node_packs'][0]['install_action'] == 'moss_nodes'
 
 
 def test_recovery_barrier_blocks_run_and_resume_but_not_recovery_routes(

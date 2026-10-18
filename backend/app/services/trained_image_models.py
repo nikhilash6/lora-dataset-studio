@@ -14,7 +14,7 @@ from .. import config as cfg
 from ..utils.trained_image_workflows import ASSET_SPECS, REQUIRED_NODES
 from . import comfy_model_paths, model_integrity
 
-FAMILY_LABELS = {'flux': 'FLUX.1', 'anima': 'Anima', 'qwenimage21': 'Qwen-Image 2.1'}
+FAMILY_LABELS = {'flux': 'FLUX.1', 'anima': 'Anima', 'qwenimage21': 'Qwen-Image 2.1', 'moss': 'MOSS-Image'}
 
 
 def _specs(family):
@@ -44,6 +44,8 @@ def _candidates(kind):
 def _looks_like_family(family, name):
     basename = str(name).replace('\\', '/').rsplit('/', 1)[-1]
     norm = re.sub(r'[^a-z0-9]+', '', basename.lower())
+    if family == 'moss':
+        return 'mossimage' in norm and not any(s in norm for s in ('int8', 'fp8', 'gptq'))
     if family == 'flux':
         return ('flux' in norm and not any(s in norm for s in ('flux2', 'klein', 'krea')))
     if family == 'anima':
@@ -192,12 +194,14 @@ def generation_readiness(family, base_model=None, *, check_nodes=True):
          'repair': action in repairs}
         for slot, spec in _specs(family).items()
         if (action := install_action(family, slot)) in actions]
+    from .lora_test_studio import studio_missing_node_hints
     return {'family': family, 'label': FAMILY_LABELS[family], 'assets': assets,
             'ready': not missing and not invalid and not missing_nodes and classes is not None,
             'models_ready': not missing and not invalid,
             'nodes_checked': classes is not None,
             'missing_assets': missing, 'invalid_assets': invalid,
-            'missing_nodes': missing_nodes, 'install_actions': actions, 'downloads': downloads,
+            'missing_nodes': missing_nodes, 'node_packs': studio_missing_node_hints(missing_nodes),
+            'install_actions': actions, 'downloads': downloads,
             'pin_warnings': pin_warnings}
 
 

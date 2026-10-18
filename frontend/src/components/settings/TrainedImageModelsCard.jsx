@@ -25,7 +25,7 @@ export default function TrainedImageModelsCard({ config, setField }) {
   useEffect(() => { load() }, [load])
   const refresh = () => load(true)
   return (
-    <Card title="Test your trained image LoRAs" help="Prepare the local models used by FLUX.1, Anima and Qwen-Image 2.1 in Test Image and Studio. Downloads start only when you choose Install.">
+    <Card title="Test Studio image models" help="Prepare FLUX.1, Anima, Qwen-Image 2.1 and MOSS-Image for generation. MOSS uses Base model only. Downloads start only when you choose Install.">
       <div id="studio-models" className="scroll-mt-24 space-y-3">
         <p className="text-xs text-content-muted">
           Leave a file blank to detect it automatically. Existing compatible files are reused,
@@ -52,7 +52,7 @@ export default function TrainedImageModelsCard({ config, setField }) {
               <div className="space-y-4 pt-2">
                 {family.config_error && <p role="alert" className="text-sm text-red-400">{family.config_error}</p>}
                 {family.missing_nodes?.length > 0 && (
-                  <ComfyNodeRepair nodes={family.missing_nodes} onRefresh={refresh} />
+                  <ComfyNodeRepair nodes={family.missing_nodes} nodePacks={family.node_packs} onRefresh={refresh} />
                 )}
                 {!family.nodes_checked && <p className="text-xs text-content-muted">
                   ComfyUI did not answer the node check. Model files alone do not confirm readiness.

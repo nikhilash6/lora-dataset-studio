@@ -84,6 +84,12 @@ import { SETUP_DEEP_LINK_STEPS } from './hooks/useSetupSteps.js';
 // Newest first. Prepend new waves at the top.
 export const WHATS_NEW = [
   {
+    id: '2026-10-18-studio-moss-image', date: '2026-10-18',
+    title: 'Create with MOSS-Image in Test Studio',
+    blurb: 'Choose Base model only, then MOSS-Image. Existing model files are reused; missing files and the MOSS loaders can be prepared from the Studio.',
+    to: '/studio',
+  },
+  {
     id: '2026-10-17-studio-base-model-only', date: '2026-10-17',
     title: 'Generate in Test Studio without a LoRA',
     blurb: 'Choose Base model only, pick a model family and base, then enter your prompt. No trained dataset or LoRA selection is required.',

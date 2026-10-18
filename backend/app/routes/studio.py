@@ -139,7 +139,7 @@ def studio_base_models():
                         'model_defaults': defaults})
     out = [{'filename': m or '', 'label': lts._basename(m) if m else 'Default model'}
            for m in lts.family_base_models(kind)]
-    if kind in lts.TRAINED_IMAGE_FAMILIES:
+    if kind in lts.MANAGED_IMAGE_FAMILIES:
         from ..services.trained_image_models import generation_readiness
         readiness = generation_readiness(kind)
         capabilities['generation_readiness'] = readiness
